@@ -18,6 +18,8 @@ object Database {
     private val DATABASE_NAME = System.getenv("DATABASE_NAME")
     private val DATABASE_PASSWORD = System.getenv("DATABASE_PASSWORD")
 
+
+
     val db = Database.connect(DATABASE_URL, DATABASE_DRIVER, DATABASE_NAME, DATABASE_PASSWORD)
 
 
@@ -27,6 +29,12 @@ object Database {
 
         val accountModel: List<AccountFormModel> = db.sequenceOf(AccountFormTable).toList()
         println(accountModel.joinToString { it.id.toString() })
+
+
+        println(DATABASE_DRIVER)
+        println(DATABASE_URL)
+        println(DATABASE_NAME)
+        println(DATABASE_PASSWORD)
     }
 
 
@@ -62,4 +70,6 @@ object Database {
         val user_name = varchar("user_name").bindTo {it.userName}
         val role = varchar("role").bindTo {it.role}
     }
+
+
 }
