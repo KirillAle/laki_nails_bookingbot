@@ -17,6 +17,8 @@ dependencies {
 
     // PostgreSQL driver
     implementation("org.postgresql:postgresql:42.7.2")
+
+    implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
 }
 kotlin {
     jvmToolchain(17)
