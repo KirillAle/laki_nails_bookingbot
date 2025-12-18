@@ -5,11 +5,12 @@ import org.ktorm.schema.Table
 import org.ktorm.schema.int
 import org.ktorm.schema.uuid
 import org.ktorm.schema.varchar
-import java.sql.Timestamp
 import java.util.UUID
 import org.ktorm.database.Database
 import org.ktorm.entity.sequenceOf
 import org.ktorm.entity.toList
+import org.ktorm.schema.timestamp
+import java.time.Instant
 
 object Database {
     private val DATABASE_URL = System.getenv("DATABASE_URL")
@@ -17,10 +18,7 @@ object Database {
     private val DATABASE_NAME = System.getenv("DATABASE_NAME")
     private val DATABASE_PASSWORD = System.getenv("DATABASE_PASSWORD")
 
-
-
     val db = Database.connect(DATABASE_URL, DATABASE_DRIVER, DATABASE_NAME, DATABASE_PASSWORD)
-
 
     fun select() {
         val testModel: List<TestModel> = db.sequenceOf(TestTable).toList()
@@ -31,7 +29,6 @@ object Database {
 
         val bookingModel: List<BookingModel> = db.sequenceOf(BookingTable).toList()
         println(bookingModel.joinToString { it.id.toString() })
-
 
         println(DATABASE_DRIVER)
         println(DATABASE_URL)
@@ -61,7 +58,7 @@ object Database {
         val scheduleId: UUID
         val procedureId: UUID
         val statusName: String
-        val createdAt: Timestamp
+        val createdAt: Instant?
     }
 
     object TestTable: Table<TestModel>("Test"){
@@ -85,7 +82,6 @@ object Database {
         val schedule_id = uuid("schedule_id").bindTo { it.scheduleId }
         val procedure_id = uuid("procedure_id").bindTo { it.procedureId}
         val status = varchar("status").bindTo { it.statusName }
-//        val created_at = timestamp("created_at").bindTo { it.createdAt }
+        val created_at = timestamp ("created_at").bindTo { it.createdAt }
     }
-
 }
