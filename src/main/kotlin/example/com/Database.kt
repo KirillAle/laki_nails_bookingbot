@@ -30,6 +30,9 @@ object Database {
         val bookingModel: List<BookingModel> = db.sequenceOf(BookingTable).toList()
         println(bookingModel.joinToString { it.id.toString() })
 
+        val masterScheduleModel: List<MasterScheduleModel> = db.sequenceOf(MasterScheduleTable).toList()
+        println(masterScheduleModel.joinToString { it.id.toString() })
+
         println(DATABASE_DRIVER)
         println(DATABASE_URL)
         println(DATABASE_NAME)
@@ -61,6 +64,16 @@ object Database {
         val createdAt: Instant?
     }
 
+    interface MasterScheduleModel: Entity<MasterScheduleModel> {
+        val id: UUID
+        val masterId: UUID
+        val date: Instant
+        val timeStart: Instant
+        val timeEnd: Instant
+        val breakStart: Instant
+        val breakEnd: Instant
+    }
+
     object TestTable: Table<TestModel>("Test"){
         val id = int("testId").bindTo { it.testId }
         val name = varchar("testName").bindTo { it.testName }
@@ -83,5 +96,15 @@ object Database {
         val procedure_id = uuid("procedure_id").bindTo { it.procedureId}
         val status = varchar("status").bindTo { it.statusName }
         val created_at = timestamp ("created_at").bindTo { it.createdAt }
+    }
+
+    object MasterScheduleTable: Table<MasterScheduleModel>("master_schedule"){
+        val id = uuid("id").bindTo { it.id }
+        val master_id = uuid("master_id").bindTo { it.masterId }
+        val date = timestamp("date").bindTo { it.date }
+        val time_start = timestamp("time_start").bindTo { it.timeStart}
+        val time_end = timestamp("time_end").bindTo { it.timeEnd}
+        val break_start = timestamp("break_start").bindTo { it.breakStart }
+        val break_end = timestamp("break_end").bindTo { it.breakEnd }
     }
 }
