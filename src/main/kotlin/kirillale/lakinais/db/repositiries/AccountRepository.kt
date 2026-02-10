@@ -17,7 +17,7 @@ class AccountRepository {
             .firstOrNull { it.telegramId eq telegramId }
     }
 
-    fun create(
+    fun createAccount(
         telegramId: String,
         firstName: String,
         lastName: String,

@@ -2,6 +2,8 @@ package kirillale.lakinais.db
 
 import kirillale.lakinais.db.entities.AccountFormEntity
 import kirillale.lakinais.db.tables.AccountFormTable
+import kirillale.lakinais.db.entities.BookingEntity
+import kirillale.lakinais.db.tables.BookingTable
 import org.ktorm.database.Database
 import org.ktorm.entity.Entity
 import org.ktorm.entity.sequenceOf
@@ -34,7 +36,7 @@ object DatabaseFactory {
         }
 
         try {
-            val bookingModel: List<BookingModel> = db.sequenceOf(BookingTable).toList()
+            val bookingModel: List<BookingEntity> = db.sequenceOf(BookingTable).toList()
             println("Booking models: ${bookingModel.joinToString { it.id.toString() }}")
         } catch (e: Exception) {
             println("Ошибка при чтении BookingTable: ${e.message}")
@@ -51,17 +53,6 @@ object DatabaseFactory {
         println("DATABASE_USER: $DATABASE_USER")
     }
 
-
-
-    interface BookingModel : Entity<BookingModel> {
-        val id: UUID
-        val clientId: UUID
-        val masterId: UUID
-        val scheduleId: UUID
-        val procedureId: UUID
-        val statusName: String
-        val createdAt: Instant?
-    }
 
     interface MasterScheduleModel: Entity<MasterScheduleModel> {
         val id: UUID
@@ -80,17 +71,6 @@ object DatabaseFactory {
         val durationSlot: Int
     }
 
-
-
-    object BookingTable: Table<BookingModel>("booking"){
-        val id = uuid("id").bindTo { it.id }
-        val client_id = uuid("client_id").bindTo { it.clientId }
-        val master_id = uuid("master_id").bindTo { it.masterId }
-        val schedule_id = uuid("schedule_id").bindTo { it.scheduleId }
-        val procedure_id = uuid("procedure_id").bindTo { it.procedureId}
-        val status = varchar("status").bindTo { it.statusName }
-        val created_at = timestamp ("created_at").bindTo { it.createdAt }
-    }
 
     object MasterScheduleTable: Table<MasterScheduleModel>("master_schedule"){
         val id = uuid("id").bindTo { it.id }

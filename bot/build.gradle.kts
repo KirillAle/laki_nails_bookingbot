@@ -19,9 +19,6 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.2")
 
     implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
-    
-    // Зависимость от основного модуля для доступа к AccountService и другим классам
-    implementation(project(":"))
 }
 kotlin {
     jvmToolchain(17)

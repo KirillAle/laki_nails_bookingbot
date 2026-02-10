@@ -1,4 +1,4 @@
-package kirillale.lakinais.db.sevice
+package kirillale.lakinais.db.service
 
 import kirillale.lakinais.db.entities.AccountFormEntity
 import kirillale.lakinais.db.repositiries.AccountRepository
@@ -16,7 +16,7 @@ class AccountService(
         val existing = accountRepository.findByTelegramId(telegramId)
         if (existing != null) return existing
 
-        return accountRepository.create(
+        return accountRepository.createAccount(
             telegramId = telegramId,
             firstName = firstName,
             lastName = lastName,
