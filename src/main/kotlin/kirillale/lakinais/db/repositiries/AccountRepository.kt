@@ -12,9 +12,20 @@ class AccountRepository {
 
     private val db = DatabaseFactory.db
 
+    fun findById(id: UUID): AccountFormEntity? {
+        return db.sequenceOf(AccountFormTable)
+            .firstOrNull { it.id eq id }
+    }
+
     fun findByTelegramId(telegramId: String): AccountFormEntity? {
         return db.sequenceOf(AccountFormTable)
             .firstOrNull { it.telegramId eq telegramId }
+    }
+
+    fun findByRole(role: String): List<AccountFormEntity> {
+        return db.sequenceOf(AccountFormTable)
+            .filter { it.role eq role }
+            .toList()
     }
 
     fun createAccount(

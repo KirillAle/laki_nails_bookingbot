@@ -2,6 +2,8 @@ package kirillale.lakinais.db.service
 
 import kirillale.lakinais.db.entities.BookingEntity
 import kirillale.lakinais.db.repositiries.BookingRepository
+import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 class BookingService(
@@ -14,10 +16,11 @@ class BookingService(
      */
     fun createBooking(
         clientId: UUID,
-        masterId: UUID,
         scheduleId: UUID,
         procedureId: UUID,
-        initialStatus: String = "PENDING"
+        initialStatus: String = "PENDING",
+        priceSnapshot: BigDecimal? = null,
+        startTime: Instant? = null
     ): BookingEntity {
         val existingForSlot = bookingRepository.findByScheduleId(scheduleId)
         if (existingForSlot != null) {
@@ -26,10 +29,11 @@ class BookingService(
 
         return bookingRepository.createBooking(
             clientId = clientId,
-            masterId = masterId,
             scheduleId = scheduleId,
             procedureId = procedureId,
-            statusName = initialStatus
+            statusName = initialStatus,
+            priceSnapshot = priceSnapshot,
+            startTime = startTime
         )
     }
 
@@ -43,10 +47,6 @@ class BookingService(
 
     fun getClientBookings(clientId: UUID): List<BookingEntity> {
         return bookingRepository.findByClientId(clientId)
-    }
-
-    fun getMasterBookings(masterId: UUID): List<BookingEntity> {
-        return bookingRepository.findByMasterId(masterId)
     }
 
     fun isSlotAvailable(scheduleId: UUID): Boolean {

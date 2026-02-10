@@ -5,6 +5,7 @@ import kirillale.lakinais.db.entities.BookingEntity
 import kirillale.lakinais.db.tables.BookingTable
 import org.ktorm.dsl.eq
 import org.ktorm.entity.*
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
@@ -23,12 +24,6 @@ class BookingRepository {
             .toList()
     }
 
-    fun findByMasterId(masterId: UUID): List<BookingEntity> {
-        return db.sequenceOf(BookingTable)
-            .filter { it.master_id eq masterId }
-            .toList()
-    }
-
     fun findByScheduleId(scheduleId: UUID): BookingEntity? {
         return db.sequenceOf(BookingTable)
             .firstOrNull { it.schedule_id eq scheduleId }
@@ -42,18 +37,20 @@ class BookingRepository {
 
     fun createBooking(
         clientId: UUID,
-        masterId: UUID,
         scheduleId: UUID,
         procedureId: UUID,
-        statusName: String
+        statusName: String,
+        priceSnapshot: BigDecimal? = null,
+        startTime: Instant? = null
     ): BookingEntity {
         val entity = BookingEntity {
             id = UUID.randomUUID()
             this.clientId = clientId
-            this.masterId = masterId
             this.scheduleId = scheduleId
             this.procedureId = procedureId
             this.statusName = statusName
+            this.priceSnapshot = priceSnapshot
+            this.startTime = startTime
             createdAt = Instant.now()
         }
 
