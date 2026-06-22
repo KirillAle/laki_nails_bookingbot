@@ -26,10 +26,15 @@ class MasterScheduleRepository {
 
     fun findByMasterIdAndDate(masterId: UUID, date: Instant): List<MasterScheduleEntity> {
         return db.sequenceOf(MasterScheduleTable)
-            .filter { 
+            .filter {
                 (it.master_id eq masterId) and (it.date eq date)
             }
             .toList()
+    }
+
+    /** Вариант А: одна строка на (мастер, дата). Возвращает её или null. */
+    fun findOneByMasterIdAndDate(masterId: UUID, date: Instant): MasterScheduleEntity? {
+        return findByMasterIdAndDate(masterId, date).firstOrNull()
     }
 
     fun createSchedule(
@@ -51,6 +56,28 @@ class MasterScheduleRepository {
         }
 
         db.sequenceOf(MasterScheduleTable).add(entity)
+        return entity
+    }
+
+    fun deleteById(id: UUID): Boolean {
+        val entity = findById(id) ?: return false
+        entity.delete()
+        return true
+    }
+
+    fun updateDayHours(
+        id: UUID,
+        timeStart: Instant,
+        timeEnd: Instant,
+        breakStart: Instant,
+        breakEnd: Instant,
+    ): MasterScheduleEntity? {
+        val entity = findById(id) ?: return null
+        entity.timeStart = timeStart
+        entity.timeEnd = timeEnd
+        entity.breakStart = breakStart
+        entity.breakEnd = breakEnd
+        entity.flushChanges()
         return entity
     }
 }

@@ -1,9 +1,10 @@
 package kirillale.lakinais.plugins
 
-import kirillale.lakinais.db.DatabaseFactory
 import io.ktor.server.application.Application
-
+import kirillale.lakinais.db.DatabaseFactory
+import kirillale.lakinais.db.seedProceduresIfNeeded
 
 fun Application.configureKtormDbConnection() {
-    DatabaseFactory.select()
+    DatabaseFactory.init()
+    seedProceduresIfNeeded()
 }

@@ -36,6 +36,10 @@ class ProcedureService(
         return procedureRepository.findBySubtype(procedureSubtype)
     }
 
+    fun getByTypeAndSubtype(procedureType: String, procedureSubtype: String): ProcedureEntity? {
+        return procedureRepository.findByTypeAndSubtype(procedureType, procedureSubtype)
+    }
+
     fun getActiveProcedures(): List<ProcedureEntity> {
         return procedureRepository.findActive()
     }

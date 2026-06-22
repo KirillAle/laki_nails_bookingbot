@@ -1,2 +1,24 @@
-*.env
+# Gradle
+.gradle/
+build/
+bot/build/
+out/
+
+# IDE
+.idea/
+*.iml
+local.properties
+
+# Secrets — никогда не коммитить
+.env
 .env.*
+environment.env
+*.env
+!environment.env.example
+
+# OS
+.DS_Store
+
+# GraalVM / native (generated)
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

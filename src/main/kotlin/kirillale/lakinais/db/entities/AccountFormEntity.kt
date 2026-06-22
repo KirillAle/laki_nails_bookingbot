@@ -14,5 +14,6 @@ interface AccountFormEntity : Entity<AccountFormEntity> {
     var lastName: String
     var userName: String
     var role: String
+    var phone: String?
     var createdAt: Instant
 }

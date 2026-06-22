@@ -1,92 +1,394 @@
 package kirillale.lakinais.plugins
 
-import dev.inmo.micro_utils.coroutines.subscribe
 import dev.inmo.tgbotapi.bot.ktor.telegramBot
+import dev.inmo.tgbotapi.extensions.api.edit.reply_markup.editMessageReplyMarkup
 import dev.inmo.tgbotapi.extensions.api.send.sendMessage
+import dev.inmo.tgbotapi.extensions.api.answers.answerCallbackQuery
+import dev.inmo.tgbotapi.extensions.behaviour_builder.buildBehaviourWithLongPolling
+import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onCommand
+import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onContact
+import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onDataCallbackQuery
+import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onText
 import dev.inmo.tgbotapi.extensions.utils.extensions.raw.from
-import dev.inmo.tgbotapi.extensions.utils.shortcuts.textMessages
-import dev.inmo.tgbotapi.extensions.utils.updates.retrieving.longPolling
-import dev.inmo.tgbotapi.types.buttons.ReplyKeyboardMarkup
-import dev.inmo.tgbotapi.types.buttons.SimpleKeyboardButton
+import dev.inmo.tgbotapi.types.message.content.TextContent
+import dev.inmo.tgbotapi.types.queries.callback.MessageDataCallbackQuery
 import io.ktor.server.application.Application
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kirillale.lakinais.booking.DateInterval
+import kirillale.lakinais.booking.WorkDayDefaults
+import kirillale.lakinais.bot.BookingFlowState
+import kirillale.lakinais.bot.BotBookingNavigator
+import kirillale.lakinais.bot.BotCallbackData
+import kirillale.lakinais.bot.BotKeyboards
+import kirillale.lakinais.bot.BotProcedureCatalog
+import kirillale.lakinais.bot.BotUi
+import kirillale.lakinais.bot.PhoneValidator
+import kirillale.lakinais.bot.master.MasterBotNavigator
+import kirillale.lakinais.bot.master.MasterCallbackData
+import kirillale.lakinais.bot.master.MasterFlowState
+import kirillale.lakinais.config.AppEnv
 import kirillale.lakinais.db.service.AccountService
+import kirillale.lakinais.db.service.BookingAvailabilityService
+import kirillale.lakinais.db.service.BookingCreationService
+import kirillale.lakinais.db.service.BookingManagementService
+import kirillale.lakinais.db.service.BookingQueryService
+import kirillale.lakinais.db.service.MasterResolver
+import kirillale.lakinais.db.service.ScheduleManagementService
+import kirillale.lakinais.domain.role.PermissionService
+import org.slf4j.LoggerFactory
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.UUID
 
+private val log = LoggerFactory.getLogger("TgBot")
 
+private fun Application.readZoneId(): ZoneId =
+    ZoneId.of(environment.config.propertyOrNull("booking.timezone")?.getString() ?: "Asia/Tbilisi")
+
+private fun Application.readMasterResolver(): MasterResolver {
+    val masterId = environment.config.propertyOrNull("booking.masterId")?.getString()?.let(UUID::fromString)
+    return MasterResolver(configuredMasterId = masterId)
+}
+
+private fun Application.readWorkDayDefaults(): WorkDayDefaults {
+    val cfg = environment.config
+    return WorkDayDefaults.parse(
+        workStart = cfg.propertyOrNull("booking.workStart")?.getString() ?: "10:00",
+        workEnd = cfg.propertyOrNull("booking.workEnd")?.getString() ?: "19:00",
+        breakStart = cfg.propertyOrNull("booking.breakStart")?.getString() ?: "14:00",
+        breakEnd = cfg.propertyOrNull("booking.breakEnd")?.getString() ?: "15:00",
+        horizonDays = cfg.propertyOrNull("booking.defaultOpenHorizonDays")?.getString()?.toIntOrNull() ?: 30,
+    )
+}
 
 fun Application.configureApplicationTgBot() {
-    val botToken: String =
-        environment.config.propertyOrNull("telegram.botToken")?.getString()
-        ?: System.getenv("LAKI_NAILS_BOT_TOKEN")
-        ?: error("Telegram bot token is not set")
+    val botToken = environment.config.propertyOrNull("telegram.botToken")?.getString()
+        ?: AppEnv.get("LAKI_NAILS_BOT_TOKEN")
+        ?: error("Задайте LAKI_NAILS_BOT_TOKEN в environment.env или telegram.botToken в конфиге")
+
+    val zoneId = readZoneId()
+    val workDayDefaults = readWorkDayDefaults()
+    val accountService = AccountService()
+    val permissionService = PermissionService()
+    val masterResolver = readMasterResolver()
 
     val bot = telegramBot(botToken)
+    val clientNavigator = BotBookingNavigator(
+        bot = bot,
+        availabilityService = BookingAvailabilityService(),
+        masterResolver = masterResolver,
+        bookingCreationService = BookingCreationService(),
+        accountService = accountService,
+        zoneId = zoneId,
+    )
+    val masterNavigator = MasterBotNavigator(
+        bot = bot,
+        permissionService = permissionService,
+        masterResolver = masterResolver,
+        scheduleManagementService = ScheduleManagementService(),
+        bookingQueryService = BookingQueryService(),
+        bookingManagementService = BookingManagementService(),
+        workDayDefaults = workDayDefaults,
+        zoneId = zoneId,
+    )
 
-    val scope = CoroutineScope(Dispatchers.Default)
+    CoroutineScope(Dispatchers.Default).launch {
+        bot.buildBehaviourWithLongPolling {
+            onCommand("start") { message ->
+                val user = message.from ?: return@onCommand
+                val chatIdKey = message.chat.id.toString()
+                BookingFlowState.clear(chatIdKey)
+                MasterFlowState.clear(chatIdKey)
 
-
-    scope.launch {
-        bot.longPolling {
-            textMessages().subscribe(scope) { message ->
-                println(message.chat)
-
-//                 Для отображения имени пользователя, который пищет сообщение
-                val user = message.from
-                val userName = user?.username?.username ?: "без имени"
-                val firstName = user?.firstName ?: ""
-                val lastName = user?.lastName ?: ""
-                val  displayName = when {
-                    userName != "без имени" -> "$userName"
-                    else -> "$firstName $lastName".trim()
+                val account = try {
+                    accountService.findOrCreateTelegramUser(
+                        telegramId = user.id.chatId.toString(),
+                        firstName = user.firstName ?: "",
+                        lastName = user.lastName ?: "",
+                        userName = user.username?.username ?: "",
+                    )
+                } catch (e: Exception) {
+                    log.warn("Не удалось сохранить пользователя: {}", e.message)
+                    null
                 }
 
-                bot.sendMessage(
-                    message.chat.id,
-                     "Пользователь $displayName написали: ${message.content.text}")
-
-                val text = message.content.text
-                val accountService = AccountService()
-
-                if (text == "/start") {
-                    // Сохраняем пользователя в БД
-                    val telegramUser = user ?: return@subscribe
-                    val telegramId = telegramUser.id.chatId.toString()
-                    val firstName = telegramUser.firstName ?: ""
-                    val lastName = telegramUser.lastName ?: ""
-                    val userName = telegramUser.username?.username ?: ""
-                    
-                    try {
-                        val savedUser = accountService.findOrCreateTelegramUser(
-                            telegramId = telegramId,
-                            firstName = firstName,
-                            lastName = lastName,
-                            userName = userName
-                        )
-                        println("Пользователь сохранен: ${savedUser.id}")
-                    } catch (e: Exception) {
-                        println("Ошибка при сохранении пользователя: ${e.message}")
-                        e.printStackTrace()
-                    }
-                    
-                    bot.sendMessage(
-                        chatId = message.chat.id,
-                        text = "Выбери услугу:",
-                        replyMarkup = ReplyKeyboardMarkup(
-                            keyboard = listOf(
-                                listOf(
-                                    SimpleKeyboardButton("\uD83D\uDC85 Маникюр"),
-                                    SimpleKeyboardButton("\uD83E\uDDB6 Педикюр"),
-                                )
-                            ),
-                            resizeKeyboard = true
-                        )
+                if (account != null && masterNavigator.isStaff(account)) {
+                    sendMessage(message.chat.id, "Добро пожаловать! У вас доступно меню мастера.", replyMarkup = BotUi.startReplyKeyboard())
+                    masterNavigator.sendMainMenu(message.chat.id, account)
+                } else {
+                    log.warn(
+                        "Клиентский /start: tg={} username={} accountId={} role={}",
+                        user.id.chatId,
+                        user.username?.username,
+                        account?.id,
+                        account?.role,
                     )
-                    return@subscribe
+                    sendMessage(
+                        message.chat.id,
+                        "Нажми кнопку ниже, чтобы приступить к выбору процедур.",
+                        replyMarkup = BotUi.startReplyKeyboard(),
+                    )
                 }
             }
-        }
+
+            onText(initialFilter = { (it.content as? TextContent)?.text == BotUi.START_BUTTON }) { message ->
+                val chatIdKey = message.chat.id.toString()
+                val staffClient = BookingFlowState.isStaffClientMode(chatIdKey)
+                BookingFlowState.clear(chatIdKey)
+                if (staffClient) BookingFlowState.enableStaffClientMode(chatIdKey)
+                sendMessage(
+                    message.chat.id,
+                    "Выбери процедуры (до 1 маникюра и 1 педикюра), затем нажми 🟢 ВЫБРАТЬ ДАТУ.",
+                    replyMarkup = BotKeyboards.procedureKeyboard(emptyList(), staffClient),
+                )
+            }
+
+            onText(initialFilter = { (it.content as? TextContent)?.text == BotUi.MASTER_MENU_BUTTON }) { message ->
+                val user = message.from ?: return@onText
+                val chatIdKey = message.chat.id.toString()
+                val account = accountService.getByTelegramId(user.id.chatId.toString())
+                if (account == null || !masterNavigator.isStaff(account)) return@onText
+                BookingFlowState.clear(chatIdKey)
+                masterNavigator.sendMainMenu(message.chat.id, account)
+            }
+
+            onText(initialFilter = { BookingFlowState.isAwaitingPhone(it.chat.id.toString()) }) { message ->
+                val user = message.from ?: return@onText
+                val chatIdKey = message.chat.id.toString()
+                val text = (message.content as? TextContent)?.text ?: return@onText
+                val phone = PhoneValidator.normalize(text) ?: run {
+                    sendMessage(message.chat.id, "Не удалось распознать номер. Пример: +995555123456")
+                    return@onText
+                }
+                clientNavigator.handlePhoneReceived(message.chat.id, chatIdKey, user.id.chatId.toString(), phone)
+            }
+
+            onContact { message ->
+                val user = message.from ?: return@onContact
+                val chatIdKey = message.chat.id.toString()
+                if (!BookingFlowState.isAwaitingPhone(chatIdKey)) return@onContact
+                val contact = message.content.contact
+                if (contact.userId != null && contact.userId != user.id) {
+                    sendMessage(message.chat.id, "Отправьте свой номер через кнопку «Поделиться номером».")
+                    return@onContact
+                }
+                val phone = PhoneValidator.normalize(contact.phoneNumber) ?: contact.phoneNumber
+                clientNavigator.handlePhoneReceived(message.chat.id, chatIdKey, user.id.chatId.toString(), phone)
+            }
+
+            onDataCallbackQuery { callback ->
+                if (callback !is MessageDataCallbackQuery) return@onDataCallbackQuery
+                val chatId = callback.message.chat.id
+                val chatIdKey = chatId.toString()
+                val data = callback.data
+                val telegramId = callback.from.id.chatId.toString()
+
+                try {
+                    when {
+                        data.startsWith(MasterCallbackData.PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            val account = accountService.getByTelegramId(telegramId)
+                            if (account == null || !masterNavigator.isStaff(account)) {
+                                sendMessage(chatId, "Нет доступа к меню мастера.")
+                                return@onDataCallbackQuery
+                            }
+                            handleMasterCallback(data, chatId, chatIdKey, account, masterNavigator, workDayDefaults)
+                        }
+
+                        data == BotCallbackData.CHOOSE_DATE -> {
+                            val selected = BookingFlowState.getSelection(chatIdKey)
+                            if (selected.isEmpty()) {
+                                answerCallbackQuery(callback, "Сначала выбери процедуру", showAlert = true)
+                            } else {
+                                answerCallbackQuery(callback)
+                                clientNavigator.sendIntervalsScreen(chatId, chatIdKey)
+                            }
+                        }
+
+                        data == BotCallbackData.PRIORITY_MANICURE -> {
+                            answerCallbackQuery(callback)
+                            BookingFlowState.setSplitPriority(
+                                chatIdKey,
+                                BookingFlowState.getSelection(chatIdKey).first { it.procedureType == "Маникюр" },
+                            )
+                            clientNavigator.sendIntervalsScreen(chatId, chatIdKey)
+                        }
+
+                        data == BotCallbackData.PRIORITY_PEDICURE -> {
+                            answerCallbackQuery(callback)
+                            BookingFlowState.setSplitPriority(
+                                chatIdKey,
+                                BookingFlowState.getSelection(chatIdKey).first { it.procedureType == "Педикюр" },
+                            )
+                            clientNavigator.sendIntervalsScreen(chatId, chatIdKey)
+                        }
+
+                        data.startsWith(BotCallbackData.PROCEDURE_PREFIX) -> {
+                            val index = data.removePrefix(BotCallbackData.PROCEDURE_PREFIX).toIntOrNull()
+                            if (index == null) {
+                                answerCallbackQuery(callback)
+                                return@onDataCallbackQuery
+                            }
+                            val options = BotProcedureCatalog.all()
+                            if (index !in options.indices) {
+                                answerCallbackQuery(callback)
+                                return@onDataCallbackQuery
+                            }
+                            answerCallbackQuery(callback)
+                            val selected = BookingFlowState.toggle(chatIdKey, options[index])
+                            editMessageReplyMarkup(
+                                callback.message,
+                                replyMarkup = BotKeyboards.procedureKeyboard(
+                                    selected,
+                                    BookingFlowState.isStaffClientMode(chatIdKey),
+                                ),
+                            )
+                        }
+
+                        data.startsWith(BotCallbackData.INTERVAL_PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            val parts = data.removePrefix(BotCallbackData.INTERVAL_PREFIX).split(":")
+                            if (parts.size != 2) return@onDataCallbackQuery
+                            clientNavigator.sendDatesScreen(
+                                chatId, chatIdKey,
+                                DateInterval(LocalDate.ofEpochDay(parts[0].toLong()), LocalDate.ofEpochDay(parts[1].toLong()), ""),
+                            )
+                        }
+
+                        data.startsWith(BotCallbackData.DAY_PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            clientNavigator.sendSlotsScreen(chatId, chatIdKey, UUID.fromString(data.removePrefix(BotCallbackData.DAY_PREFIX)))
+                        }
+
+                        data.startsWith(BotCallbackData.SLOT_PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            val payload = data.removePrefix(BotCallbackData.SLOT_PREFIX)
+                            val sep = payload.lastIndexOf(':')
+                            if (sep < 0) return@onDataCallbackQuery
+                            clientNavigator.handleSlotSelected(
+                                chatId, chatIdKey, telegramId,
+                                UUID.fromString(payload.substring(0, sep)),
+                                Instant.ofEpochSecond(payload.substring(sep + 1).toLong()),
+                            )
+                        }
+
+                        data == BotCallbackData.CONFIRM_YES -> {
+                            answerCallbackQuery(callback)
+                            clientNavigator.handleConfirmYes(chatId, chatIdKey, telegramId)
+                        }
+
+                        data == BotCallbackData.CONFIRM_NO -> {
+                            answerCallbackQuery(callback)
+                            clientNavigator.handleConfirmNo(chatId, chatIdKey)
+                        }
+
+                        data == BotCallbackData.SPLIT -> {
+                            answerCallbackQuery(callback)
+                            BookingFlowState.enableSplit(chatIdKey)
+                            clientNavigator.sendIntervalsScreen(chatId, chatIdKey)
+                        }
+
+                        data == BotCallbackData.BACK_PROCEDURES -> {
+                            answerCallbackQuery(callback)
+                            BookingFlowState.clearPending(chatIdKey)
+                            sendMessage(
+                                chatId,
+                                "Выбери процедуры:",
+                                replyMarkup = BotKeyboards.procedureKeyboard(
+                                    BookingFlowState.getSelection(chatIdKey),
+                                    BookingFlowState.isStaffClientMode(chatIdKey),
+                                ),
+                            )
+                        }
+
+                        data == BotCallbackData.BACK_INTERVALS -> {
+                            answerCallbackQuery(callback)
+                            BookingFlowState.clearPending(chatIdKey)
+                            clientNavigator.sendIntervalsScreen(chatId, chatIdKey)
+                        }
+
+                        data.startsWith(BotCallbackData.BACK_DATES_PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            val parts = data.removePrefix(BotCallbackData.BACK_DATES_PREFIX).split(":")
+                            if (parts.size != 2) return@onDataCallbackQuery
+                            clientNavigator.sendDatesScreen(
+                                chatId, chatIdKey,
+                                DateInterval(LocalDate.ofEpochDay(parts[0].toLong()), LocalDate.ofEpochDay(parts[1].toLong()), ""),
+                            )
+                        }
+
+                        else -> {
+                            log.warn("Неизвестный callback: {}", data)
+                            answerCallbackQuery(callback)
+                        }
+                    }
+                } catch (e: Exception) {
+                    log.error("Ошибка callback: {}", e.message, e)
+                    answerCallbackQuery(callback, "Ошибка. Попробуйте /start", showAlert = true)
+                }
+            }
+        }.join()
     }
 }
 
+private suspend fun handleMasterCallback(
+    data: String,
+    chatId: dev.inmo.tgbotapi.types.IdChatIdentifier,
+    chatIdKey: String,
+    account: kirillale.lakinais.db.entities.AccountFormEntity,
+    masterNavigator: MasterBotNavigator,
+    workDayDefaults: WorkDayDefaults,
+) {
+    when {
+        data == MasterCallbackData.MENU -> {
+            BookingFlowState.clear(chatIdKey)
+            masterNavigator.sendMainMenu(chatId, account)
+        }
+        data == MasterCallbackData.OPEN_MENU -> masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
+        data == MasterCallbackData.OPEN_CONFIRM -> masterNavigator.confirmOpenPeriod(chatId, chatIdKey, account)
+        data == MasterCallbackData.OPEN_MINUS -> {
+            MasterFlowState.adjustHorizon(chatIdKey, workDayDefaults.defaultOpenHorizonDays, -1)
+            masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
+        }
+        data == MasterCallbackData.OPEN_PLUS -> {
+            MasterFlowState.adjustHorizon(chatIdKey, workDayDefaults.defaultOpenHorizonDays, 1)
+            masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
+        }
+        data.startsWith(MasterCallbackData.OPEN_PRESET_PREFIX) -> {
+            val days = data.removePrefix(MasterCallbackData.OPEN_PRESET_PREFIX).toIntOrNull() ?: return
+            MasterFlowState.setHorizon(chatIdKey, days)
+            masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
+        }
+        data == MasterCallbackData.BOOKS_TODAY -> masterNavigator.sendTodayBookings(chatId, account)
+        data == MasterCallbackData.BOOKS_PICK_DAY -> masterNavigator.sendPickDayForBookings(chatId, account)
+        data.startsWith(MasterCallbackData.BOOKS_DAY_PREFIX) -> {
+            val scheduleId = UUID.fromString(data.removePrefix(MasterCallbackData.BOOKS_DAY_PREFIX))
+            masterNavigator.sendBookingsForSchedule(chatId, scheduleId)
+        }
+        data.startsWith(MasterCallbackData.BOOK_PREFIX) -> {
+            val bookingId = UUID.fromString(data.removePrefix(MasterCallbackData.BOOK_PREFIX))
+            masterNavigator.showBooking(chatId, bookingId)
+        }
+        data.startsWith(MasterCallbackData.BOOK_CANCEL_PREFIX) -> {
+            val bookingId = UUID.fromString(data.removePrefix(MasterCallbackData.BOOK_CANCEL_PREFIX))
+            masterNavigator.cancelBooking(chatId, account, bookingId)
+        }
+        data.startsWith(MasterCallbackData.BOOK_CONFIRM_PREFIX) -> {
+            val bookingId = UUID.fromString(data.removePrefix(MasterCallbackData.BOOK_CONFIRM_PREFIX))
+            masterNavigator.confirmBooking(chatId, account, bookingId)
+        }
+        data == MasterCallbackData.CLOSE_PICK -> masterNavigator.sendCloseDayPicker(chatId, account)
+        data.startsWith(MasterCallbackData.CLOSE_DAY_PREFIX) -> {
+            val scheduleId = UUID.fromString(data.removePrefix(MasterCallbackData.CLOSE_DAY_PREFIX))
+            masterNavigator.closeDay(chatId, account, scheduleId)
+        }
+        data == MasterCallbackData.BLOCK_TIME -> masterNavigator.blockTimeInfo(chatId)
+        data == MasterCallbackData.CLIENT_MODE -> {
+            BookingFlowState.clear(chatIdKey)
+            masterNavigator.enterClientMode(chatId, chatIdKey)
+        }
+    }
+}

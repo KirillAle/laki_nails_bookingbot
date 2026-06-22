@@ -7,5 +7,13 @@ ktor:
         shutdown:
             url: "/shutdown"
 
-    telegram:
-      botToken: "8481953221:AAHoBJuooVFP64ViaQPP6_xKn8_-Az0J24U"
+booking:
+    timezone: "Asia/Tbilisi"
+    workStart: "10:00"
+    workEnd: "19:00"
+    breakStart: "14:00"
+    breakEnd: "15:00"
+    defaultOpenHorizonDays: 30
+    masterId: "d08a0027-82a8-4750-9a86-f4a2701153fe"
+
+# Токен бота: переменная окружения LAKI_NAILS_BOT_TOKEN

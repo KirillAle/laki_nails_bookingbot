@@ -7,10 +7,6 @@ import kirillale.lakinais.plugins.configureKtormDbConnection
 import kirillale.lakinais.plugins.configureRouting
 import kirillale.lakinais.plugins.configureSerialization
 
-//
-
-
-
 fun main(args: Array<String>) {
     EngineMain.main(args)
 }
@@ -18,6 +14,6 @@ fun main(args: Array<String>) {
 suspend fun Application.module() {
     configureSerialization()
     configureRouting()
-    configureApplicationTgBot()
     configureKtormDbConnection()
+    configureApplicationTgBot()
 }

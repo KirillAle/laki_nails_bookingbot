@@ -1,0 +1,1 @@
+ALTER TABLE account_form ADD COLUMN IF NOT EXISTS phone VARCHAR(32);

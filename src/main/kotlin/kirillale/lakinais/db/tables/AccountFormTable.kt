@@ -27,6 +27,9 @@ object AccountFormTable: Table<AccountFormEntity>("account_form"){
     val role = varchar("role")
         .bindTo(AccountFormEntity::role)
 
+    val phone = varchar("phone")
+        .bindTo(AccountFormEntity::phone)
+
     val createdAt = timestamp("created_at")
         .bindTo(AccountFormEntity::createdAt)
 }

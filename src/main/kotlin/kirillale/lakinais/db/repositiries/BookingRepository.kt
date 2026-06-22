@@ -3,6 +3,7 @@ package kirillale.lakinais.db.repositiries
 import kirillale.lakinais.db.DatabaseFactory
 import kirillale.lakinais.db.entities.BookingEntity
 import kirillale.lakinais.db.tables.BookingTable
+import org.ktorm.dsl.and
 import org.ktorm.dsl.eq
 import org.ktorm.entity.*
 import java.math.BigDecimal
@@ -24,9 +25,19 @@ class BookingRepository {
             .toList()
     }
 
-    fun findByScheduleId(scheduleId: UUID): BookingEntity? {
+    /** Все бронирования на этот день (вариант А: schedule_id = день). */
+    fun findByScheduleId(scheduleId: UUID): List<BookingEntity> {
         return db.sequenceOf(BookingTable)
-            .firstOrNull { it.schedule_id eq scheduleId }
+            .filter { it.schedule_id eq scheduleId }
+            .toList()
+    }
+
+    /** Занят ли конкретный слот в этот день в это время (вариант А). */
+    fun findByScheduleIdAndStartTime(scheduleId: UUID, startTime: Instant): BookingEntity? {
+        return db.sequenceOf(BookingTable)
+            .firstOrNull {
+                (it.schedule_id eq scheduleId) and (it.start_time eq startTime)
+            }
     }
 
     fun findByStatus(statusName: String): List<BookingEntity> {
@@ -64,4 +75,15 @@ class BookingRepository {
         existing.flushChanges()
         return existing
     }
+
+    fun updateSlot(id: UUID, scheduleId: UUID, startTime: Instant): BookingEntity? {
+        val existing = findById(id) ?: return null
+        existing.scheduleId = scheduleId
+        existing.startTime = startTime
+        existing.flushChanges()
+        return existing
+    }
+
+    fun findActiveByScheduleId(scheduleId: UUID): List<BookingEntity> =
+        findByScheduleId(scheduleId).filter { it.statusName != "CANCELLED" }
 }

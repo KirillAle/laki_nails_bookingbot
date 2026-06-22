@@ -31,7 +31,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:$logback_version")
     implementation("io.ktor:ktor-server-config-yaml")
     implementation("dev.inmo:tgbotapi:30.0.1")
-//    implementation("dev.inmo:tgbotapi.longpolling:30.0.1")
+    implementation("dev.inmo:tgbotapi.behaviour_builder:30.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.0")
 
     implementation("org.ktorm:ktorm-core:3.6.0")
@@ -48,4 +48,26 @@ dependencies {
 
 kotlin {
     jvmToolchain(17)
+}
+
+tasks.register<JavaExec>("dbInspect") {
+    group = "application"
+    description = "Inspect PostgreSQL schema and data"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("kirillale.lakinais.tools.DbInspectKt")
+}
+
+tasks.register<JavaExec>("cleanTestData") {
+    group = "application"
+    description = "Remove mock data created by DatabaseEntitiesTest (dry-run; add -Pexecute to delete)"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("kirillale.lakinais.tools.CleanTestDataKt")
+    if (project.hasProperty("execute")) {
+        systemProperty("execute", "true")
+    }
+}
+
+tasks.test {
+    // Интеграционные тесты пишут в PostgreSQL — только явно: ./gradlew test -PrunDbTests
+    onlyIf { project.hasProperty("runDbTests") }
 }

@@ -3,6 +3,7 @@ package kirillale.lakinais.db.repositiries
 import kirillale.lakinais.db.DatabaseFactory
 import kirillale.lakinais.db.entities.ProcedureEntity
 import kirillale.lakinais.db.tables.ProcedureTable
+import org.ktorm.dsl.and
 import org.ktorm.dsl.eq
 import org.ktorm.entity.*
 import java.util.UUID
@@ -26,6 +27,13 @@ class ProcedureRepository {
         return db.sequenceOf(ProcedureTable)
             .filter { it.procedure_subtype eq procedureSubtype }
             .toList()
+    }
+
+    fun findByTypeAndSubtype(procedureType: String, procedureSubtype: String): ProcedureEntity? {
+        return db.sequenceOf(ProcedureTable)
+            .firstOrNull {
+                (it.procedure_type eq procedureType) and (it.procedure_subtype eq procedureSubtype)
+            }
     }
 
     fun findActive(): List<ProcedureEntity> {

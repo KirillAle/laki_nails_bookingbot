@@ -52,4 +52,10 @@ class MasterTimeBlockRepository {
         db.sequenceOf(MasterTimeBlockTable).add(entity)
         return entity
     }
+
+    fun deleteById(id: UUID): Boolean {
+        val entity = findById(id) ?: return false
+        entity.delete()
+        return true
+    }
 }

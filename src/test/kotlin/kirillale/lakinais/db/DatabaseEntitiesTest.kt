@@ -8,7 +8,6 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DatabaseEntitiesTest {
@@ -318,10 +317,10 @@ class DatabaseEntitiesTest {
         assertTrue(byClient.isNotEmpty())
         println("✓ Найдено бронирований клиента: ${byClient.size}")
         
-        // Поиск по расписанию
+        // Поиск по расписанию (вариант А: на один день может быть несколько бронирований)
         val bySchedule = repository.findByScheduleId(schedule.id)
-        assertNotNull(bySchedule)
-        println("✓ Найдено бронирование по расписанию: ${bySchedule.id}")
+        assertTrue(bySchedule.isNotEmpty())
+        println("✓ Найдено бронирование по расписанию: ${bySchedule.first().id}")
         
         // Поиск по статусу
         val byStatus = repository.findByStatus("PENDING")

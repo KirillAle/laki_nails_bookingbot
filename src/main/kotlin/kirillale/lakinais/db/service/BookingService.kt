@@ -11,8 +11,8 @@ class BookingService(
 ) {
 
     /**
-     * Создать новое бронирование с базовой валидацией:
-     * - проверяем, что слот (scheduleId) ещё не занят
+     * Создать новое бронирование (вариант А: день = одна строка master_schedule, слот = день + startTime).
+     * startTime обязателен.
      */
     fun createBooking(
         clientId: UUID,
@@ -22,11 +22,11 @@ class BookingService(
         priceSnapshot: BigDecimal? = null,
         startTime: Instant? = null
     ): BookingEntity {
-        val existingForSlot = bookingRepository.findByScheduleId(scheduleId)
-        if (existingForSlot != null) {
-            throw IllegalStateException("Слот уже занят для scheduleId=$scheduleId")
+        require(startTime != null) { "Для варианта А (1 день = 1 строка) startTime обязателен" }
+        val existing = bookingRepository.findByScheduleIdAndStartTime(scheduleId, startTime)
+        if (existing != null && existing.statusName != "CANCELLED") {
+            throw IllegalStateException("Слот уже занят: день=$scheduleId, время=$startTime")
         }
-
         return bookingRepository.createBooking(
             clientId = clientId,
             scheduleId = scheduleId,
@@ -49,8 +49,15 @@ class BookingService(
         return bookingRepository.findByClientId(clientId)
     }
 
-    fun isSlotAvailable(scheduleId: UUID): Boolean {
-        return bookingRepository.findByScheduleId(scheduleId) == null
+    /** Свободен ли слот в этот день в это время (вариант А). */
+    fun isSlotAvailable(scheduleId: UUID, startTime: Instant): Boolean {
+        val existing = bookingRepository.findByScheduleIdAndStartTime(scheduleId, startTime)
+        return existing == null || existing.statusName == "CANCELLED"
+    }
+
+    /** Все бронирования на день (для мастера / проверок). */
+    fun getBookingsByScheduleId(scheduleId: UUID): List<BookingEntity> {
+        return bookingRepository.findByScheduleId(scheduleId)
     }
 
     fun getById(id: UUID): BookingEntity? {
