@@ -30,7 +30,6 @@ class BookingAvailabilityService(
     ): IntervalSearchResult {
         require(procedures.isNotEmpty()) { "Нужна хотя бы одна процедура" }
         val today = LocalDate.now(zoneId)
-        val intervals = DateIntervalBuilder.visibleIntervals(today)
         val schedules = openSchedulesInHorizon(masterId, today, zoneId)
 
         if (schedules.isEmpty()) return IntervalSearchResult.NothingAvailable
@@ -47,15 +46,14 @@ class BookingAvailabilityService(
             if (!hasAnyConsecutive) return IntervalSearchResult.ConsecutiveUnavailable
         }
 
-        val available = intervals.filter { interval ->
-            hasAvailabilityInInterval(
-                schedules, interval, procedures, mode, splitPriority, today, zoneId
-            )
-        }
-        return if (available.isEmpty()) {
+        val availableDates = collectAvailableDates(
+            schedules, procedures, mode, splitPriority, today, zoneId,
+        )
+        val intervals = DateIntervalBuilder.intervalsFromAvailableDates(availableDates)
+        return if (intervals.isEmpty()) {
             IntervalSearchResult.NothingAvailable
         } else {
-            IntervalSearchResult.Intervals(available)
+            IntervalSearchResult.Intervals(intervals)
         }
     }
 
@@ -94,6 +92,7 @@ class BookingAvailabilityService(
         zoneId: ZoneId,
     ): List<AvailableSlot> {
         val schedule = masterScheduleRepository.findById(scheduleId) ?: return emptyList()
+        if (!schedule.isOpen) return emptyList()
         return slotsForSelection(schedule, procedures, mode, splitPriority, zoneId)
     }
 
@@ -102,6 +101,24 @@ class BookingAvailabilityService(
         val end = LocalTime.from(slot.endTime.atZone(zoneId))
         return "${timeFormatter.format(start)}–${timeFormatter.format(end)}"
     }
+
+    private fun collectAvailableDates(
+        schedules: List<MasterScheduleEntity>,
+        procedures: List<BotProcedureOption>,
+        mode: BookingSlotMode,
+        splitPriority: BotProcedureOption?,
+        today: LocalDate,
+        zoneId: ZoneId,
+    ): List<LocalDate> =
+        schedules.mapNotNull { schedule ->
+            val day = schedule.date.atZone(zoneId).toLocalDate()
+            if (!dayInHorizon(schedule, today, zoneId)) return@mapNotNull null
+            if (slotsForSelection(schedule, procedures, mode, splitPriority, zoneId).isEmpty()) {
+                null
+            } else {
+                day
+            }
+        }.sorted()
 
     private fun slotsForSelection(
         schedule: MasterScheduleEntity,
@@ -144,22 +161,6 @@ class BookingAvailabilityService(
         return slots.filter { it.startTime.isAfter(now) }
     }
 
-    private fun hasAvailabilityInInterval(
-        schedules: List<MasterScheduleEntity>,
-        interval: DateInterval,
-        procedures: List<BotProcedureOption>,
-        mode: BookingSlotMode,
-        splitPriority: BotProcedureOption?,
-        today: LocalDate,
-        zoneId: ZoneId,
-    ): Boolean = schedules.any { schedule ->
-        val day = schedule.date.atZone(zoneId).toLocalDate()
-        dayInHorizon(schedule, today, zoneId) &&
-            !day.isBefore(interval.from) &&
-            !day.isAfter(interval.to) &&
-            slotsForSelection(schedule, procedures, mode, splitPriority, zoneId).isNotEmpty()
-    }
-
     private fun openSchedulesInHorizon(
         masterId: UUID,
         today: LocalDate,
@@ -168,8 +169,10 @@ class BookingAvailabilityService(
         val horizonEnd = today.plusDays(DateIntervalBuilder.BOOKING_HORIZON_DAYS)
         return masterScheduleRepository.findByMasterId(masterId)
             .filter { schedule ->
-                val day = schedule.date.atZone(zoneId).toLocalDate()
-                !day.isBefore(today) && !day.isAfter(horizonEnd)
+                schedule.isOpen && run {
+                    val day = schedule.date.atZone(zoneId).toLocalDate()
+                    !day.isBefore(today) && !day.isAfter(horizonEnd)
+                }
             }
             .sortedBy { it.date }
     }

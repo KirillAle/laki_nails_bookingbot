@@ -17,4 +17,11 @@ object SalonTime {
 
     fun toLocalTime(instant: Instant, zoneId: ZoneId): LocalTime =
         instant.atZone(zoneId).toLocalTime()
+
+    /** Вариант А: день в schedule.date, время суток — в booking.start_time. */
+    fun bookingStartOnDay(scheduleDay: Instant, storedStart: Instant, zoneId: ZoneId): Instant {
+        val day = toLocalDate(scheduleDay, zoneId)
+        val time = toLocalTime(storedStart, zoneId)
+        return atTime(day, time, zoneId)
+    }
 }

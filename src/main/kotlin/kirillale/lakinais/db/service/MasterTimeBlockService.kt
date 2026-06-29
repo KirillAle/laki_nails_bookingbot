@@ -36,4 +36,8 @@ class MasterTimeBlockService(
     fun getByMasterIdAndDate(masterId: UUID, date: Instant): List<MasterTimeBlockEntity> {
         return masterTimeBlockRepository.findByMasterIdAndDate(masterId, date)
     }
+
+    fun deleteById(id: UUID): Boolean {
+        return masterTimeBlockRepository.deleteById(id)
+    }
 }

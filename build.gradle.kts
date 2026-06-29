@@ -57,9 +57,19 @@ tasks.register<JavaExec>("dbInspect") {
     mainClass.set("kirillale.lakinais.tools.DbInspectKt")
 }
 
+tasks.register<JavaExec>("dbResetBookingData") {
+    group = "application"
+    description = "Delete all bookings and schedules (dry-run; add -Pexecute to delete)"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("kirillale.lakinais.tools.DbResetBookingDataKt")
+    if (project.hasProperty("execute")) {
+        systemProperty("execute", "true")
+    }
+}
+
 tasks.register<JavaExec>("cleanTestData") {
     group = "application"
-    description = "Remove mock data created by DatabaseEntitiesTest (dry-run; add -Pexecute to delete)"
+    description = "Remove test accounts/bookings (dry-run; add -Pexecute to delete)"
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("kirillale.lakinais.tools.CleanTestDataKt")
     if (project.hasProperty("execute")) {
@@ -68,6 +78,18 @@ tasks.register<JavaExec>("cleanTestData") {
 }
 
 tasks.test {
-    // Интеграционные тесты пишут в PostgreSQL — только явно: ./gradlew test -PrunDbTests
+    filter {
+        excludeTestsMatching("kirillale.lakinais.db.BookingOverlapDbTest")
+    }
+}
+
+tasks.register<Test>("dbTest") {
+    group = "verification"
+    description = "PostgreSQL integration tests (./gradlew dbTest -PrunDbTests)"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    filter {
+        includeTestsMatching("kirillale.lakinais.db.BookingOverlapDbTest")
+    }
     onlyIf { project.hasProperty("runDbTests") }
 }

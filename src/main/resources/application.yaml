@@ -13,6 +13,9 @@ booking:
     workEnd: "19:00"
     breakStart: "14:00"
     breakEnd: "15:00"
+    weekendWorkStart: "11:00"
+    weekendWorkEnd: "17:00"
+    # weekendBreakStart / weekendBreakEnd — опционально; если не заданы, выходные без перерыва
     defaultOpenHorizonDays: 30
     masterId: "d08a0027-82a8-4750-9a86-f4a2701153fe"
 

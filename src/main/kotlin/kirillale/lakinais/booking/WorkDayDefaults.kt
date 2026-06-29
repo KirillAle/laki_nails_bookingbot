@@ -1,7 +1,10 @@
 package kirillale.lakinais.booking
 
+import kirillale.lakinais.booking.schedule.WeekSchedulePlan
+import kirillale.lakinais.booking.schedule.WorkDayProfile
 import java.time.LocalTime
 
+/** @deprecated Используйте [WeekSchedulePlan]. Оставлено для обратной совместимости конфига. */
 data class WorkDayDefaults(
     val workStart: LocalTime,
     val workEnd: LocalTime,
@@ -9,6 +12,20 @@ data class WorkDayDefaults(
     val breakEnd: LocalTime,
     val defaultOpenHorizonDays: Int = 30,
 ) {
+    fun toWeekPlan(): WeekSchedulePlan = WeekSchedulePlan(
+        weekday = WorkDayProfile(
+            workStart = workStart,
+            workEnd = workEnd,
+            breakInterval = kirillale.lakinais.booking.schedule.TimeRange(breakStart, breakEnd),
+        ),
+        weekend = WorkDayProfile(
+            workStart = workStart,
+            workEnd = workEnd,
+            breakInterval = null,
+        ),
+        defaultHorizonDays = defaultOpenHorizonDays,
+    )
+
     companion object {
         fun parse(
             workStart: String = "10:00",

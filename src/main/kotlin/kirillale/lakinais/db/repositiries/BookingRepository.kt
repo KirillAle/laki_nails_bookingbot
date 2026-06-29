@@ -5,6 +5,7 @@ import kirillale.lakinais.db.entities.BookingEntity
 import kirillale.lakinais.db.tables.BookingTable
 import org.ktorm.dsl.and
 import org.ktorm.dsl.eq
+import org.ktorm.dsl.or
 import org.ktorm.entity.*
 import java.math.BigDecimal
 import java.time.Instant
@@ -30,14 +31,6 @@ class BookingRepository {
         return db.sequenceOf(BookingTable)
             .filter { it.schedule_id eq scheduleId }
             .toList()
-    }
-
-    /** Занят ли конкретный слот в этот день в это время (вариант А). */
-    fun findByScheduleIdAndStartTime(scheduleId: UUID, startTime: Instant): BookingEntity? {
-        return db.sequenceOf(BookingTable)
-            .firstOrNull {
-                (it.schedule_id eq scheduleId) and (it.start_time eq startTime)
-            }
     }
 
     fun findByStatus(statusName: String): List<BookingEntity> {
@@ -84,6 +77,17 @@ class BookingRepository {
         return existing
     }
 
+    fun deleteById(id: UUID): Boolean {
+        val entity = findById(id) ?: return false
+        entity.delete()
+        return true
+    }
+
     fun findActiveByScheduleId(scheduleId: UUID): List<BookingEntity> =
         findByScheduleId(scheduleId).filter { it.statusName != "CANCELLED" }
+
+    fun findActive(): List<BookingEntity> =
+        db.sequenceOf(BookingTable)
+            .filter { it.status eq "PENDING" or (it.status eq "CONFIRMED") }
+            .toList()
 }

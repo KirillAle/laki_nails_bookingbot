@@ -1,5 +1,6 @@
 package kirillale.lakinais.db.service
 
+import kirillale.lakinais.booking.BookingIntervals
 import kirillale.lakinais.booking.BookingSlotMode
 import kirillale.lakinais.bot.BotProcedureOption
 import kirillale.lakinais.db.entities.BookingEntity
@@ -65,19 +66,32 @@ class BookingCreationService(
                     "Отмените одну из них или дождитесь визита.",
             )
         }
-        return plan.map { item ->
-            if (!bookingService.isSlotAvailable(item.scheduleId, item.startTime)) {
+        val reservedInPlan = mutableListOf<Pair<Instant, Instant>>()
+        val created = mutableListOf<BookingEntity>()
+        for (item in plan) {
+            if (!bookingService.isSlotAvailable(
+                    scheduleId = item.scheduleId,
+                    startTime = item.startTime,
+                    durationSlots = item.option.durationSlots,
+                    extraOccupied = reservedInPlan,
+                )) {
                 throw SlotTakenException("Окно ${item.startTime} уже занято. Выберите другое время.")
             }
-            bookingService.createBooking(
+            val booking = bookingService.createBooking(
                 clientId = clientId,
                 scheduleId = item.scheduleId,
                 procedureId = item.procedureId,
                 initialStatus = "PENDING",
                 priceSnapshot = item.price,
                 startTime = item.startTime,
+                extraOccupied = reservedInPlan,
             )
+            reservedInPlan.add(
+                item.startTime to BookingIntervals.slotEnd(item.startTime, item.option.durationSlots),
+            )
+            created.add(booking)
         }
+        return created
     }
 
     private fun planItem(

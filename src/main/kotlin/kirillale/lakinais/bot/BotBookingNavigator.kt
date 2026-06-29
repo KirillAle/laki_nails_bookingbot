@@ -12,6 +12,8 @@ import kirillale.lakinais.db.service.AccountService
 import kirillale.lakinais.db.service.BookingAvailabilityService
 import kirillale.lakinais.db.service.BookingCreationService
 import kirillale.lakinais.db.service.BookingLimitExceededException
+import kirillale.lakinais.db.service.BookingManagementService
+import kirillale.lakinais.db.service.BookingQueryService
 import kirillale.lakinais.db.service.MasterResolver
 import kirillale.lakinais.db.service.SlotTakenException
 import java.time.Instant
@@ -24,6 +26,8 @@ class BotBookingNavigator(
     private val availabilityService: BookingAvailabilityService,
     private val masterResolver: MasterResolver,
     private val bookingCreationService: BookingCreationService,
+    private val bookingQueryService: BookingQueryService,
+    private val bookingManagementService: BookingManagementService,
     private val accountService: AccountService,
     private val zoneId: ZoneId,
 ) {
@@ -270,6 +274,61 @@ class BotBookingNavigator(
         }
     }
 
+    suspend fun sendMyBookings(chatId: IdChatIdentifier, chatIdKey: String, accountId: UUID) {
+        val bookings = bookingQueryService.listActiveForClient(accountId, zoneId)
+        val header = if (bookings.isEmpty()) {
+            "У вас нет активных записей."
+        } else {
+            "Ваши записи (${bookings.size}):"
+        }
+        bot.sendMessage(
+            chatId,
+            header,
+            replyMarkup = BotKeyboards.clientBookingsList(bookings, staffMenu(chatIdKey)),
+        )
+    }
+
+    suspend fun showClientBooking(chatId: IdChatIdentifier, chatIdKey: String, accountId: UUID, bookingId: UUID) {
+        val view = bookingQueryService.listActiveForClient(accountId, zoneId)
+            .firstOrNull { it.bookingId == bookingId }
+        if (view == null) {
+            bot.sendMessage(chatId, "Запись не найдена или уже отменена.")
+            return
+        }
+        bot.sendMessage(
+            chatId,
+            buildString {
+                appendLine("📋 Ваша запись")
+                appendLine("${view.dateLabel}, ${view.timeLabel}")
+                appendLine(view.procedureLabel)
+                appendLine("Статус: ${clientStatusLabel(view.status)}")
+                appendLine()
+                appendLine("Чтобы перенести — отмените запись и выберите новое время.")
+            },
+            replyMarkup = BotKeyboards.clientBookingActions(bookingId, staffMenu(chatIdKey)),
+        )
+    }
+
+    suspend fun cancelClientBooking(chatId: IdChatIdentifier, chatIdKey: String, accountId: UUID, bookingId: UUID) {
+        bookingManagementService.cancelForClient(accountId, bookingId)
+            .onSuccess {
+                bot.sendMessage(chatId, "Запись отменена.")
+                sendMyBookings(chatId, chatIdKey, accountId)
+            }
+            .onFailure { e ->
+                bot.sendMessage(chatId, e.message ?: "Не удалось отменить запись.")
+            }
+    }
+
+    suspend fun sendProcedureMenu(chatId: IdChatIdentifier, chatIdKey: String, fresh: Boolean = false) {
+        val selected = if (fresh) emptyList() else BookingFlowState.getSelection(chatIdKey)
+        bot.sendMessage(
+            chatId,
+            "Выбери процедуры (до 1 маникюра и 1 педикюра), затем нажми 🟢 ВЫБРАТЬ ДАТУ.",
+            replyMarkup = BotKeyboards.procedureKeyboard(selected, staffMenu(chatIdKey)),
+        )
+    }
+
     suspend fun handleConfirmNo(chatId: IdChatIdentifier, chatIdKey: String) {
         val state = BookingFlowState.getOrCreate(chatIdKey)
         val scheduleId = state.pendingScheduleId
@@ -280,6 +339,13 @@ class BotBookingNavigator(
         } else {
             sendIntervalsScreen(chatId, chatIdKey)
         }
+    }
+
+    private fun clientStatusLabel(status: String): String = when (status) {
+        "PENDING" -> "ожидает подтверждения мастера"
+        "CONFIRMED" -> "подтверждена"
+        "CANCELLED" -> "отменена"
+        else -> status
     }
 
     private suspend fun proceedToPhoneOrConfirm(

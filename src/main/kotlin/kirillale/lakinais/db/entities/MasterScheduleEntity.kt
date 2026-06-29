@@ -15,4 +15,5 @@ interface MasterScheduleEntity : Entity<MasterScheduleEntity> {
     var timeEnd: Instant
     var breakStart: Instant
     var breakEnd: Instant
+    var isOpen: Boolean
 }

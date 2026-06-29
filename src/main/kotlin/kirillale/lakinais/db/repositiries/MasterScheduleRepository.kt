@@ -13,6 +13,17 @@ class MasterScheduleRepository {
 
     private val db = DatabaseFactory.db
 
+    fun ensureSchema() {
+        db.useConnection { conn ->
+            conn.createStatement().execute(
+                """
+                ALTER TABLE master_schedule
+                ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT TRUE
+                """.trimIndent(),
+            )
+        }
+    }
+
     fun findById(id: UUID): MasterScheduleEntity? {
         return db.sequenceOf(MasterScheduleTable)
             .firstOrNull { it.id eq id }
@@ -53,9 +64,17 @@ class MasterScheduleRepository {
             this.timeEnd = timeEnd
             this.breakStart = breakStart
             this.breakEnd = breakEnd
+            isOpen = true
         }
 
         db.sequenceOf(MasterScheduleTable).add(entity)
+        return entity
+    }
+
+    fun setOpen(id: UUID, open: Boolean): MasterScheduleEntity? {
+        val entity = findById(id) ?: return null
+        entity.isOpen = open
+        entity.flushChanges()
         return entity
     }
 

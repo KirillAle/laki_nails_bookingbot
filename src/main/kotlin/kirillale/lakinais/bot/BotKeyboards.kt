@@ -25,27 +25,31 @@ object BotCallbackData {
     const val BACK_DATES_PREFIX = "back:day:"
     const val CONFIRM_YES = "cfm:y"
     const val CONFIRM_NO = "cfm:n"
+    const val MY_BOOKINGS = "my:lb"
+    const val CLIENT_BOOK_PREFIX = "c:b:"
+    const val CLIENT_CANCEL_PREFIX = "c:cx:"
+    const val CLIENT_BOOKINGS_BACK = "c:bb"
 }
 
 object BotKeyboards {
-    private const val SELECTED_PREFIX = "✓ "
 
     fun procedureKeyboard(selected: List<BotProcedureOption>, showMasterMenu: Boolean = false): InlineKeyboardMarkup {
-        val selectedTexts = selected.mapTo(mutableSetOf()) { it.buttonText }
-        val procedureRows = BotProcedureCatalog.all().chunked(2) { row ->
-            row.map { option ->
-                val label = if (option.buttonText in selectedTexts) {
-                    SELECTED_PREFIX + option.buttonText
-                } else {
-                    option.buttonText
-                }
-                val index = BotProcedureCatalog.all().indexOfFirst { it.buttonText == option.buttonText }
-                CallbackDataInlineKeyboardButton(label, BotCallbackData.PROCEDURE_PREFIX + index)
-            }
+        val selectedKeys = selected.mapTo(mutableSetOf()) { it.procedureType to it.procedureSubtype }
+        val procedureRows = BotProcedureCatalog.all().mapIndexed { index, option ->
+            val isSelected = (option.procedureType to option.procedureSubtype) in selectedKeys
+            listOf(
+                CallbackDataInlineKeyboardButton(
+                    option.inlineButtonLabel(isSelected),
+                    BotCallbackData.PROCEDURE_PREFIX + index,
+                ),
+            )
         }
-        val rows = procedureRows.toMutableList()
+        val rows = mutableListOf(
+            listOf(CallbackDataInlineKeyboardButton("📋 Мои записи", BotCallbackData.MY_BOOKINGS)),
+        )
+        rows += procedureRows
         rows += listOf(
-            CallbackDataInlineKeyboardButton("🟢 ВЫБРАТЬ ДАТУ", BotCallbackData.CHOOSE_DATE),
+            listOf(CallbackDataInlineKeyboardButton("🟢 ВЫБРАТЬ ДАТУ", BotCallbackData.CHOOSE_DATE)),
         )
         rows.addStaffMasterRow(showMasterMenu)
         return InlineKeyboardMarkup(keyboard = rows)
@@ -176,6 +180,41 @@ object BotKeyboards {
         oneTimeKeyboard = true,
     )
 
+    fun clientBookingsList(
+        bookings: List<kirillale.lakinais.db.service.BookingView>,
+        showMasterMenu: Boolean = false,
+    ): InlineKeyboardMarkup {
+        val rows = bookings.map { view ->
+            listOf(
+                CallbackDataInlineKeyboardButton(
+                    "${view.dateLabel} ${view.timeLabel}",
+                    "${BotCallbackData.CLIENT_BOOK_PREFIX}${view.bookingId}",
+                ),
+            )
+        }.toMutableList()
+        if (rows.isEmpty()) {
+            rows += listOf(listOf(CallbackDataInlineKeyboardButton("Нет активных записей", BotCallbackData.CLIENT_BOOKINGS_BACK)))
+        }
+        rows += listOf(listOf(CallbackDataInlineKeyboardButton("◀️ К процедурам", BotCallbackData.CLIENT_BOOKINGS_BACK)))
+        rows.addStaffMasterRow(showMasterMenu)
+        return InlineKeyboardMarkup(keyboard = rows)
+    }
+
+    fun clientBookingActions(bookingId: java.util.UUID, showMasterMenu: Boolean = false): InlineKeyboardMarkup {
+        val rows = mutableListOf(
+            listOf(
+                CallbackDataInlineKeyboardButton(
+                    "❌ Отменить запись",
+                    "${BotCallbackData.CLIENT_CANCEL_PREFIX}$bookingId",
+                ),
+            ),
+            listOf(CallbackDataInlineKeyboardButton("◀️ К моим записям", BotCallbackData.MY_BOOKINGS)),
+            listOf(CallbackDataInlineKeyboardButton("◀️ К процедурам", BotCallbackData.CLIENT_BOOKINGS_BACK)),
+        )
+        rows.addStaffMasterRow(showMasterMenu)
+        return InlineKeyboardMarkup(keyboard = rows)
+    }
+
     private fun MutableList<List<CallbackDataInlineKeyboardButton>>.addStaffMasterRow(showMasterMenu: Boolean) {
         if (showMasterMenu) {
             add(listOf(CallbackDataInlineKeyboardButton("🛠 Меню мастера", MasterCallbackData.MENU)))
@@ -183,5 +222,5 @@ object BotKeyboards {
     }
 
     private fun shortLabel(option: BotProcedureOption): String =
-        option.procedureType + " " + option.procedureSubtype.take(20)
+        "${option.categoryIcon} ${option.procedureSubtype.take(24)}"
 }

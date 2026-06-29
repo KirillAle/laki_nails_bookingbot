@@ -15,10 +15,12 @@ import dev.inmo.tgbotapi.types.queries.callback.MessageDataCallbackQuery
 import io.ktor.server.application.Application
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kirillale.lakinais.booking.DateInterval
-import kirillale.lakinais.booking.WorkDayDefaults
+import kirillale.lakinais.booking.schedule.WeekSchedulePlan
 import kirillale.lakinais.bot.BookingFlowState
+import kirillale.lakinais.bot.BookingReminderService
 import kirillale.lakinais.bot.BotBookingNavigator
 import kirillale.lakinais.bot.BotCallbackData
 import kirillale.lakinais.bot.BotKeyboards
@@ -53,13 +55,17 @@ private fun Application.readMasterResolver(): MasterResolver {
     return MasterResolver(configuredMasterId = masterId)
 }
 
-private fun Application.readWorkDayDefaults(): WorkDayDefaults {
+private fun Application.readWeekSchedulePlan(): WeekSchedulePlan {
     val cfg = environment.config
-    return WorkDayDefaults.parse(
-        workStart = cfg.propertyOrNull("booking.workStart")?.getString() ?: "10:00",
-        workEnd = cfg.propertyOrNull("booking.workEnd")?.getString() ?: "19:00",
-        breakStart = cfg.propertyOrNull("booking.breakStart")?.getString() ?: "14:00",
-        breakEnd = cfg.propertyOrNull("booking.breakEnd")?.getString() ?: "15:00",
+    return WeekSchedulePlan.fromConfig(
+        weekdayWorkStart = cfg.propertyOrNull("booking.workStart")?.getString() ?: "10:00",
+        weekdayWorkEnd = cfg.propertyOrNull("booking.workEnd")?.getString() ?: "19:00",
+        weekdayBreakStart = cfg.propertyOrNull("booking.breakStart")?.getString() ?: "14:00",
+        weekdayBreakEnd = cfg.propertyOrNull("booking.breakEnd")?.getString() ?: "15:00",
+        weekendWorkStart = cfg.propertyOrNull("booking.weekendWorkStart")?.getString(),
+        weekendWorkEnd = cfg.propertyOrNull("booking.weekendWorkEnd")?.getString(),
+        weekendBreakStart = cfg.propertyOrNull("booking.weekendBreakStart")?.getString(),
+        weekendBreakEnd = cfg.propertyOrNull("booking.weekendBreakEnd")?.getString(),
         horizonDays = cfg.propertyOrNull("booking.defaultOpenHorizonDays")?.getString()?.toIntOrNull() ?: 30,
     )
 }
@@ -70,7 +76,7 @@ fun Application.configureApplicationTgBot() {
         ?: error("Задайте LAKI_NAILS_BOT_TOKEN в environment.env или telegram.botToken в конфиге")
 
     val zoneId = readZoneId()
-    val workDayDefaults = readWorkDayDefaults()
+    val schedulePlan = readWeekSchedulePlan()
     val accountService = AccountService()
     val permissionService = PermissionService()
     val masterResolver = readMasterResolver()
@@ -81,6 +87,8 @@ fun Application.configureApplicationTgBot() {
         availabilityService = BookingAvailabilityService(),
         masterResolver = masterResolver,
         bookingCreationService = BookingCreationService(),
+        bookingQueryService = BookingQueryService(),
+        bookingManagementService = BookingManagementService(),
         accountService = accountService,
         zoneId = zoneId,
     )
@@ -91,9 +99,22 @@ fun Application.configureApplicationTgBot() {
         scheduleManagementService = ScheduleManagementService(),
         bookingQueryService = BookingQueryService(),
         bookingManagementService = BookingManagementService(),
-        workDayDefaults = workDayDefaults,
+        defaultSchedulePlan = schedulePlan,
         zoneId = zoneId,
     )
+    val reminderService = BookingReminderService(zoneId = zoneId)
+    reminderService.ensureStorage()
+
+    CoroutineScope(Dispatchers.Default).launch {
+        while (true) {
+            try {
+                reminderService.sendDueReminders(bot)
+            } catch (e: Exception) {
+                log.warn("Reminder tick failed: {}", e.message)
+            }
+            delay(15 * 60 * 1000L)
+        }
+    }
 
     CoroutineScope(Dispatchers.Default).launch {
         bot.buildBehaviourWithLongPolling {
@@ -116,7 +137,12 @@ fun Application.configureApplicationTgBot() {
                 }
 
                 if (account != null && masterNavigator.isStaff(account)) {
-                    sendMessage(message.chat.id, "Добро пожаловать! У вас доступно меню мастера.", replyMarkup = BotUi.startReplyKeyboard())
+                    BookingFlowState.enableStaffClientMode(chatIdKey)
+                    sendMessage(
+                        message.chat.id,
+                        "Добро пожаловать! Запись клиента и меню мастера — кнопками ниже.",
+                        replyMarkup = BotUi.staffClientReplyKeyboard(),
+                    )
                     masterNavigator.sendMainMenu(message.chat.id, account)
                 } else {
                     log.warn(
@@ -139,11 +165,14 @@ fun Application.configureApplicationTgBot() {
                 val staffClient = BookingFlowState.isStaffClientMode(chatIdKey)
                 BookingFlowState.clear(chatIdKey)
                 if (staffClient) BookingFlowState.enableStaffClientMode(chatIdKey)
-                sendMessage(
-                    message.chat.id,
-                    "Выбери процедуры (до 1 маникюра и 1 педикюра), затем нажми 🟢 ВЫБРАТЬ ДАТУ.",
-                    replyMarkup = BotKeyboards.procedureKeyboard(emptyList(), staffClient),
-                )
+                clientNavigator.sendProcedureMenu(message.chat.id, chatIdKey, fresh = true)
+            }
+
+            onText(initialFilter = { (it.content as? TextContent)?.text == BotUi.MY_BOOKINGS_BUTTON }) { message ->
+                val user = message.from ?: return@onText
+                val chatIdKey = message.chat.id.toString()
+                val account = accountService.getByTelegramId(user.id.chatId.toString()) ?: return@onText
+                clientNavigator.sendMyBookings(message.chat.id, chatIdKey, account.id)
             }
 
             onText(initialFilter = { (it.content as? TextContent)?.text == BotUi.MASTER_MENU_BUTTON }) { message ->
@@ -195,7 +224,32 @@ fun Application.configureApplicationTgBot() {
                                 sendMessage(chatId, "Нет доступа к меню мастера.")
                                 return@onDataCallbackQuery
                             }
-                            handleMasterCallback(data, chatId, chatIdKey, account, masterNavigator, workDayDefaults)
+                            handleMasterCallback(data, chatId, chatIdKey, account, masterNavigator, schedulePlan)
+                        }
+
+                        data == BotCallbackData.MY_BOOKINGS -> {
+                            answerCallbackQuery(callback)
+                            val account = accountService.getByTelegramId(telegramId) ?: return@onDataCallbackQuery
+                            clientNavigator.sendMyBookings(chatId, chatIdKey, account.id)
+                        }
+
+                        data == BotCallbackData.CLIENT_BOOKINGS_BACK -> {
+                            answerCallbackQuery(callback)
+                            clientNavigator.sendProcedureMenu(chatId, chatIdKey)
+                        }
+
+                        data.startsWith(BotCallbackData.CLIENT_BOOK_PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            val bookingId = UUID.fromString(data.removePrefix(BotCallbackData.CLIENT_BOOK_PREFIX))
+                            val account = accountService.getByTelegramId(telegramId) ?: return@onDataCallbackQuery
+                            clientNavigator.showClientBooking(chatId, chatIdKey, account.id, bookingId)
+                        }
+
+                        data.startsWith(BotCallbackData.CLIENT_CANCEL_PREFIX) -> {
+                            answerCallbackQuery(callback)
+                            val bookingId = UUID.fromString(data.removePrefix(BotCallbackData.CLIENT_CANCEL_PREFIX))
+                            val account = accountService.getByTelegramId(telegramId) ?: return@onDataCallbackQuery
+                            clientNavigator.cancelClientBooking(chatId, chatIdKey, account.id, bookingId)
                         }
 
                         data == BotCallbackData.CHOOSE_DATE -> {
@@ -294,14 +348,7 @@ fun Application.configureApplicationTgBot() {
                         data == BotCallbackData.BACK_PROCEDURES -> {
                             answerCallbackQuery(callback)
                             BookingFlowState.clearPending(chatIdKey)
-                            sendMessage(
-                                chatId,
-                                "Выбери процедуры:",
-                                replyMarkup = BotKeyboards.procedureKeyboard(
-                                    BookingFlowState.getSelection(chatIdKey),
-                                    BookingFlowState.isStaffClientMode(chatIdKey),
-                                ),
-                            )
+                            clientNavigator.sendProcedureMenu(chatId, chatIdKey)
                         }
 
                         data == BotCallbackData.BACK_INTERVALS -> {
@@ -340,8 +387,9 @@ private suspend fun handleMasterCallback(
     chatIdKey: String,
     account: kirillale.lakinais.db.entities.AccountFormEntity,
     masterNavigator: MasterBotNavigator,
-    workDayDefaults: WorkDayDefaults,
+    schedulePlan: WeekSchedulePlan,
 ) {
+    val editor = masterNavigator.scheduleEditor()
     when {
         data == MasterCallbackData.MENU -> {
             BookingFlowState.clear(chatIdKey)
@@ -350,12 +398,43 @@ private suspend fun handleMasterCallback(
         data == MasterCallbackData.OPEN_MENU -> masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
         data == MasterCallbackData.OPEN_CONFIRM -> masterNavigator.confirmOpenPeriod(chatId, chatIdKey, account)
         data == MasterCallbackData.OPEN_MINUS -> {
-            MasterFlowState.adjustHorizon(chatIdKey, workDayDefaults.defaultOpenHorizonDays, -1)
+            MasterFlowState.adjustHorizon(chatIdKey, schedulePlan.defaultHorizonDays, -1)
             masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
         }
         data == MasterCallbackData.OPEN_PLUS -> {
-            MasterFlowState.adjustHorizon(chatIdKey, workDayDefaults.defaultOpenHorizonDays, 1)
+            MasterFlowState.adjustHorizon(chatIdKey, schedulePlan.defaultHorizonDays, 1)
             masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
+        }
+        data == MasterCallbackData.OPEN_CFG_WEEKDAY -> masterNavigator.onOpenWeekdayConfig(chatId, chatIdKey)
+        data == MasterCallbackData.OPEN_CFG_WEEKEND -> masterNavigator.onOpenWeekendConfig(chatId, chatIdKey)
+        data == MasterCallbackData.SCH_BACK_OPEN -> masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
+        data == MasterCallbackData.SCH_BACK_PROFILE -> {
+            val session = MasterFlowState.getProfileEdit(chatIdKey) ?: return
+            editor.sendProfileMenu(chatId, chatIdKey, profileTitleFor(session.target))
+        }
+        data == MasterCallbackData.SCH_BREAK_TOGGLE -> editor.handleBreakToggle(chatId, chatIdKey)
+        data == MasterCallbackData.SCH_SAVE_DAY -> editor.saveExistingDay(chatId, chatIdKey, masterNavigator.resolveMasterIdFor(account))
+        data == MasterCallbackData.SCH_APPLY_WEEKDAYS -> editor.applyToOpenDays(chatId, chatIdKey, masterNavigator.resolveMasterIdFor(account), kirillale.lakinais.booking.schedule.DayKindFilter.WEEKDAYS)
+        data == MasterCallbackData.SCH_APPLY_WEEKENDS -> editor.applyToOpenDays(chatId, chatIdKey, masterNavigator.resolveMasterIdFor(account), kirillale.lakinais.booking.schedule.DayKindFilter.WEEKENDS)
+        data.startsWith(MasterCallbackData.SCH_FIELD_PREFIX) -> {
+            val code = data.removePrefix(MasterCallbackData.SCH_FIELD_PREFIX)
+            val field = when (code) {
+                "ws" -> MasterFlowState.ProfileField.WORK_START
+                "we" -> MasterFlowState.ProfileField.WORK_END
+                "bs" -> MasterFlowState.ProfileField.BREAK_START
+                "be" -> MasterFlowState.ProfileField.BREAK_END
+                else -> return
+            }
+            editor.handleFieldSelect(chatId, chatIdKey, field)
+        }
+        data.startsWith(MasterCallbackData.SCH_TIME_PREFIX) -> {
+            val time = java.time.LocalTime.parse(data.removePrefix(MasterCallbackData.SCH_TIME_PREFIX))
+            editor.handleTimeSelected(chatId, chatIdKey, time)
+        }
+        data == MasterCallbackData.EDIT_DAY_PICK -> masterNavigator.sendEditDayPicker(chatId, account)
+        data.startsWith(MasterCallbackData.EDIT_DAY_PREFIX) -> {
+            val scheduleId = UUID.fromString(data.removePrefix(MasterCallbackData.EDIT_DAY_PREFIX))
+            masterNavigator.onEditDaySelected(chatId, chatIdKey, account, scheduleId)
         }
         data.startsWith(MasterCallbackData.OPEN_PRESET_PREFIX) -> {
             val days = data.removePrefix(MasterCallbackData.OPEN_PRESET_PREFIX).toIntOrNull() ?: return
@@ -363,6 +442,7 @@ private suspend fun handleMasterCallback(
             masterNavigator.sendOpenPeriodMenu(chatId, chatIdKey)
         }
         data == MasterCallbackData.BOOKS_TODAY -> masterNavigator.sendTodayBookings(chatId, account)
+        data == MasterCallbackData.BOOKS_UPCOMING -> masterNavigator.sendUpcomingBookings(chatId, account)
         data == MasterCallbackData.BOOKS_PICK_DAY -> masterNavigator.sendPickDayForBookings(chatId, account)
         data.startsWith(MasterCallbackData.BOOKS_DAY_PREFIX) -> {
             val scheduleId = UUID.fromString(data.removePrefix(MasterCallbackData.BOOKS_DAY_PREFIX))
@@ -385,10 +465,36 @@ private suspend fun handleMasterCallback(
             val scheduleId = UUID.fromString(data.removePrefix(MasterCallbackData.CLOSE_DAY_PREFIX))
             masterNavigator.closeDay(chatId, account, scheduleId)
         }
-        data == MasterCallbackData.BLOCK_TIME -> masterNavigator.blockTimeInfo(chatId)
+        data == MasterCallbackData.BLOCK_TIME -> masterNavigator.sendBlockDayPicker(chatId, account)
+        data == MasterCallbackData.BLOCK_BACK_TO_DAYS -> masterNavigator.sendBlockDayPicker(chatId, account)
+        data.startsWith(MasterCallbackData.BLOCK_PICK_DAY_PREFIX) -> {
+            val scheduleId = UUID.fromString(data.removePrefix(MasterCallbackData.BLOCK_PICK_DAY_PREFIX))
+            masterNavigator.sendBlockStartPicker(chatId, chatIdKey, account, scheduleId)
+        }
+        data.startsWith(MasterCallbackData.BLOCK_PICK_START_PREFIX) -> {
+            val t = data.removePrefix(MasterCallbackData.BLOCK_PICK_START_PREFIX)
+            val time = java.time.LocalTime.parse(t)
+            masterNavigator.handleBlockStartPicked(chatId, chatIdKey, account, time)
+        }
+        data.startsWith(MasterCallbackData.BLOCK_PICK_END_PREFIX) -> {
+            val t = data.removePrefix(MasterCallbackData.BLOCK_PICK_END_PREFIX)
+            val time = java.time.LocalTime.parse(t)
+            masterNavigator.handleBlockEndPicked(chatId, chatIdKey, account, time)
+        }
+        data == MasterCallbackData.BLOCK_CONFIRM -> masterNavigator.confirmBlock(chatId, chatIdKey, account)
+        data.startsWith(MasterCallbackData.BLOCK_DELETE_PREFIX) -> {
+            val blockId = UUID.fromString(data.removePrefix(MasterCallbackData.BLOCK_DELETE_PREFIX))
+            masterNavigator.deleteBlock(chatId, account, blockId)
+        }
         data == MasterCallbackData.CLIENT_MODE -> {
             BookingFlowState.clear(chatIdKey)
             masterNavigator.enterClientMode(chatId, chatIdKey)
         }
     }
+}
+
+private fun profileTitleFor(target: MasterFlowState.ProfileEditTarget): String = when (target) {
+    MasterFlowState.ProfileEditTarget.OpenWeekday -> "График будней"
+    MasterFlowState.ProfileEditTarget.OpenWeekend -> "График выходных"
+    is MasterFlowState.ProfileEditTarget.ExistingDay -> "График дня"
 }

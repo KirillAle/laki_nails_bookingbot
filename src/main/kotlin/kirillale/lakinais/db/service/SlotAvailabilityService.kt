@@ -1,5 +1,7 @@
 package kirillale.lakinais.db.service
 
+import kirillale.lakinais.booking.BookingIntervals
+import kirillale.lakinais.booking.SalonTime
 import kirillale.lakinais.db.entities.MasterScheduleEntity
 import kirillale.lakinais.db.model.AvailableSlot
 import kirillale.lakinais.db.repositiries.BookingRepository
@@ -28,39 +30,45 @@ class SlotAvailabilityService(
 
     /**
      * Доступные слоты на один день (одну запись master_schedule).
-     * Учитываются: перерыв дня, блокировки мастера, занятые бронирования (с полной длительностью).
+     * Учитываются: перерыв дня, блокировки мастера, занятые бронирования (полная длительность услуги
+     * + 15 мин перерыв только после конца записи). Слот показывается только если вся услуга влезает.
      */
     fun getAvailableSlotsForDay(
         schedule: MasterScheduleEntity,
         slotDurationSlots: Int = 1,
         zoneId: ZoneId = ZoneId.systemDefault(),
     ): List<AvailableSlot> {
+        if (!schedule.isOpen) return emptyList()
         val scheduleId = schedule.id
         val masterId = schedule.masterId
         val dayDate = schedule.date
 
         val dayStart = atDayAndTime(dayDate, schedule.timeStart, zoneId)
         val dayEnd = atDayAndTime(dayDate, schedule.timeEnd, zoneId)
-        val breakStart = atDayAndTime(dayDate, schedule.breakStart, zoneId)
-        val breakEnd = atDayAndTime(dayDate, schedule.breakEnd, zoneId)
+        val hasBreak = kirillale.lakinais.booking.schedule.ScheduleMapper.hasBreak(schedule, zoneId)
+        val breakStart = if (hasBreak) atDayAndTime(dayDate, schedule.breakStart, zoneId) else dayStart
+        val breakEnd = if (hasBreak) atDayAndTime(dayDate, schedule.breakEnd, zoneId) else dayStart
         val durationMinutes = slotDurationSlots * slotStepMinutes
 
+        val durationSeconds = durationMinutes * 60L
         val blocks = masterTimeBlockRepository.findByMasterIdAndDate(masterId, schedule.date)
-        val bookedRanges = bookedTimeRanges(scheduleId)
+        val bookedRanges = bookedTimeRanges(schedule, zoneId)
 
         val slots = mutableListOf<AvailableSlot>()
         var slotStart = dayStart
 
-        while (slotStart.plusSeconds(durationMinutes * 60L) <= dayEnd) {
-            val slotEnd = slotStart.plusSeconds(durationMinutes * 60L)
-            val inBreak = slotStart < breakEnd && slotEnd > breakStart
+        while (slotStart.plusSeconds(durationSeconds) <= dayEnd) {
+            val slotEnd = slotStart.plusSeconds(durationSeconds)
+            val inBreak = hasBreak && slotStart < breakEnd && slotEnd > breakStart
             val inBlock = blocks.any { block ->
                 slotStart < block.endTime && slotEnd > block.startTime
             }
-            val overlapsBooking = bookedRanges.any { (bookedStart, bookedEnd) ->
-                slotStart < bookedEnd && slotEnd > bookedStart
-            }
-            if (!inBreak && !inBlock && !overlapsBooking) {
+            val fitsBookings = BookingIntervals.fitsBetweenBookings(
+                candidateStart = slotStart,
+                durationSlots = slotDurationSlots,
+                occupiedRanges = bookedRanges,
+            )
+            if (!inBreak && !inBlock && fitsBookings) {
                 slots.add(
                     AvailableSlot(
                         scheduleId = scheduleId,
@@ -85,13 +93,13 @@ class SlotAvailabilityService(
         return getAvailableSlotsForDay(schedule, slotDurationSlots = totalSlots, zoneId = zoneId)
     }
 
-    private fun bookedTimeRanges(scheduleId: UUID): List<Pair<Instant, Instant>> {
-        return bookingRepository.findByScheduleId(scheduleId).mapNotNull { booking ->
-            val start = booking.startTime ?: return@mapNotNull null
+    private fun bookedTimeRanges(schedule: MasterScheduleEntity, zoneId: ZoneId): List<Pair<Instant, Instant>> {
+        return bookingRepository.findByScheduleId(schedule.id).mapNotNull { booking ->
+            val storedStart = booking.startTime ?: return@mapNotNull null
             if (booking.statusName == "CANCELLED") return@mapNotNull null
             val procedure = procedureRepository.findById(booking.procedureId) ?: return@mapNotNull null
-            val durationSeconds = procedure.durationSlot * slotStepMinutes * 60L
-            start to start.plusSeconds(durationSeconds)
+            val start = SalonTime.bookingStartOnDay(schedule.date, storedStart, zoneId)
+            start to BookingIntervals.slotEnd(start, procedure.durationSlot)
         }
     }
 }

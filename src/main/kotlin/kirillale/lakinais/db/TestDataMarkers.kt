@@ -3,7 +3,7 @@ package kirillale.lakinais.db
 import kirillale.lakinais.bot.BotProcedureCatalog
 
 /**
- * Маркеры данных, созданных интеграционными тестами [kirillale.lakinais.db.DatabaseEntitiesTest].
+ * Маркеры данных, созданных интеграционными тестами (overlap_test_*, legacy test_*).
  */
 object TestDataMarkers {
 
@@ -13,7 +13,8 @@ object TestDataMarkers {
 
     fun isTestTelegramId(telegramId: String): Boolean {
         val tg = telegramId.trim()
-        return tg.startsWith("test_telegram_") ||
+        return tg.startsWith("overlap_test_") ||
+            tg.startsWith("test_telegram_") ||
             tg.startsWith("service_test_") ||
             tg.startsWith("master_proc_") ||
             tg.startsWith("master_block_") ||
@@ -23,6 +24,7 @@ object TestDataMarkers {
     }
 
     fun isTestProcedure(type: String, subtype: String): Boolean {
+        if (subtype.startsWith("Overlap4_") || subtype.startsWith("Overlap6_")) return true
         if (type == "Тест" && subtype == "Тест") return true
         if (subtype == "Классический") return true
         return (type to subtype) !in catalogSubtypes &&
@@ -31,7 +33,8 @@ object TestDataMarkers {
 
     /** SQL-фрагмент: telegram_id тестового аккаунта. */
     fun testAccountTelegramSqlCondition(column: String = "telegram_id"): String = """
-        $column LIKE 'test_telegram_%'
+        $column LIKE 'overlap_test_%'
+        OR $column LIKE 'test_telegram_%'
         OR $column LIKE 'service_test_%'
         OR $column LIKE 'master_proc_%'
         OR $column LIKE 'master_block_%'
