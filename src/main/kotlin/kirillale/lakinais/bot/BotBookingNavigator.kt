@@ -16,6 +16,7 @@ import kirillale.lakinais.db.service.BookingManagementService
 import kirillale.lakinais.db.service.BookingQueryService
 import kirillale.lakinais.db.service.MasterResolver
 import kirillale.lakinais.db.service.SlotTakenException
+import kirillale.lakinais.bot.master.MasterBotNavigator
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -28,6 +29,7 @@ class BotBookingNavigator(
     private val bookingCreationService: BookingCreationService,
     private val bookingQueryService: BookingQueryService,
     private val bookingManagementService: BookingManagementService,
+    private val masterNavigator: MasterBotNavigator,
     private val accountService: AccountService,
     private val zoneId: ZoneId,
 ) {
@@ -241,7 +243,7 @@ class BotBookingNavigator(
             return
         }
 
-        try {
+        val created = try {
             bookingCreationService.createFromPlan(account.id, plan)
         } catch (e: BookingLimitExceededException) {
             bot.sendMessage(chatId, e.message ?: "Слишком много активных записей")
@@ -255,6 +257,8 @@ class BotBookingNavigator(
             bot.sendMessage(chatId, "Ошибка при создании записи: ${e.message}")
             return
         }
+
+        masterNavigator.notifyStaffAboutPendingBookings(created.map { it.id })
 
         val wasStaffClient = staffMenu(chatIdKey)
         bot.sendMessage(
@@ -324,7 +328,7 @@ class BotBookingNavigator(
         val selected = if (fresh) emptyList() else BookingFlowState.getSelection(chatIdKey)
         bot.sendMessage(
             chatId,
-            "Выбери процедуры (до 1 маникюра и 1 педикюра), затем нажми 🟢 ВЫБРАТЬ ДАТУ.",
+            "Выбери процедуры (до 1 💅 и 1 🦶), затем нажми 🟢 ВЫБРАТЬ ДАТУ.",
             replyMarkup = BotKeyboards.procedureKeyboard(selected, staffMenu(chatIdKey)),
         )
     }

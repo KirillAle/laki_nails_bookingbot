@@ -1,6 +1,7 @@
 package kirillale.lakinais.bot
 
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BotProcedureLabelsTest {
@@ -10,20 +11,32 @@ class BotProcedureLabelsTest {
         BotProcedureCatalog.all().forEach { option ->
             assertTrue(
                 option.inlineButtonLabel(selected = false).length <= 64,
-                "too long unselected: ${option.procedureSubtype}",
+                "too long: ${option.keyboardLabel}",
             )
             assertTrue(
                 option.inlineButtonLabel(selected = true).length <= 64,
-                "too long selected: ${option.procedureSubtype}",
+                "too long selected: ${option.keyboardLabel}",
             )
         }
     }
 
     @Test
-    fun inlineLabelContainsFullSubtype() {
-        val long = BotProcedureCatalog.all().first { it.procedureSubtype.contains("пальчиков") }
-        val label = long.inlineButtonLabel(selected = false)
-        assertTrue(label.contains("пальчиков"))
-        assertTrue(label.contains("🦶"))
+    fun inlineLabelsAreSingleLine() {
+        BotProcedureCatalog.all().forEach { option ->
+            assertTrue(
+                !option.keyboardLabel.contains('\n'),
+                "multiline label: ${option.keyboardLabel}",
+            )
+        }
+    }
+
+    @Test
+    fun inlineLabelsDoNotShowDuration() {
+        BotProcedureCatalog.all().forEach { option ->
+            assertFalse(
+                option.keyboardLabel.any { it.isDigit() },
+                "duration in label: ${option.keyboardLabel}",
+            )
+        }
     }
 }

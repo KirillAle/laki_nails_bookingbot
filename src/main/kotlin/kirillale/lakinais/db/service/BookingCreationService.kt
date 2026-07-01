@@ -68,12 +68,14 @@ class BookingCreationService(
         }
         val reservedInPlan = mutableListOf<Pair<Instant, Instant>>()
         val created = mutableListOf<BookingEntity>()
-        for (item in plan) {
+        for ((index, item) in plan.withIndex()) {
+            val requireWholeHourStart = index == 0
             if (!bookingService.isSlotAvailable(
                     scheduleId = item.scheduleId,
                     startTime = item.startTime,
                     durationSlots = item.option.durationSlots,
                     extraOccupied = reservedInPlan,
+                    requireWholeHourStart = requireWholeHourStart,
                 )) {
                 throw SlotTakenException("Окно ${item.startTime} уже занято. Выберите другое время.")
             }
@@ -85,6 +87,7 @@ class BookingCreationService(
                 priceSnapshot = item.price,
                 startTime = item.startTime,
                 extraOccupied = reservedInPlan,
+                requireWholeHourStart = requireWholeHourStart,
             )
             reservedInPlan.add(
                 item.startTime to BookingIntervals.slotEnd(item.startTime, item.option.durationSlots),

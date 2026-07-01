@@ -82,16 +82,6 @@ fun Application.configureApplicationTgBot() {
     val masterResolver = readMasterResolver()
 
     val bot = telegramBot(botToken)
-    val clientNavigator = BotBookingNavigator(
-        bot = bot,
-        availabilityService = BookingAvailabilityService(),
-        masterResolver = masterResolver,
-        bookingCreationService = BookingCreationService(),
-        bookingQueryService = BookingQueryService(),
-        bookingManagementService = BookingManagementService(),
-        accountService = accountService,
-        zoneId = zoneId,
-    )
     val masterNavigator = MasterBotNavigator(
         bot = bot,
         permissionService = permissionService,
@@ -100,6 +90,17 @@ fun Application.configureApplicationTgBot() {
         bookingQueryService = BookingQueryService(),
         bookingManagementService = BookingManagementService(),
         defaultSchedulePlan = schedulePlan,
+        zoneId = zoneId,
+    )
+    val clientNavigator = BotBookingNavigator(
+        bot = bot,
+        availabilityService = BookingAvailabilityService(),
+        masterResolver = masterResolver,
+        bookingCreationService = BookingCreationService(),
+        bookingQueryService = BookingQueryService(),
+        bookingManagementService = BookingManagementService(),
+        masterNavigator = masterNavigator,
+        accountService = accountService,
         zoneId = zoneId,
     )
     val reminderService = BookingReminderService(zoneId = zoneId)

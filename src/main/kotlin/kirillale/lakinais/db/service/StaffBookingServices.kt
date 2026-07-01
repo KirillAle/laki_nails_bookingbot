@@ -29,6 +29,7 @@ data class BookingView(
     val bookingId: UUID,
     val clientName: String,
     val clientPhone: String?,
+    val clientUserName: String?,
     val procedureLabel: String,
     val status: String,
     val startTime: Instant,
@@ -253,6 +254,7 @@ class BookingQueryService(
             bookingId = booking.id,
             clientName = listOf(client.firstName, client.lastName).filter { it.isNotBlank() }.joinToString(" "),
             clientPhone = client.phone,
+            clientUserName = client.userName.toTelegramUserName(),
             procedureLabel = "${procedure.procedureType} / ${procedure.procedureSubtype}",
             status = booking.statusName,
             startTime = resolvedStart,
@@ -260,6 +262,11 @@ class BookingQueryService(
             dateLabel = DateIntervalBuilder.formatDayLabel(date),
             timeLabel = "${timeFormatter.format(time)}–${timeFormatter.format(endTime)}",
         )
+    }
+
+    private fun String?.toTelegramUserName(): String? {
+        val normalized = this?.trim()?.removePrefix("@").orEmpty()
+        return normalized.takeIf { it.isNotBlank() }?.let { "@$it" }
     }
 }
 

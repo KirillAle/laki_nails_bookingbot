@@ -1,13 +1,13 @@
 package kirillale.lakinais.bot
 
 /**
- * Одна процедура для кнопок бота.
  * @param buttonText полное название (подтверждение записи, сообщения)
- * @param workTimeLabel длительность работы на кнопке (без перерыва мастера)
- * @param durationSlots длительность для бронирования слота: работа + перерыв мастера, в 15-мин слотах
+ * @param keyboardLabel короткая однострочная подпись на кнопке
+ * @param workTimeLabel длительность для логики слотов
  */
 data class BotProcedureOption(
     val buttonText: String,
+    val keyboardLabel: String,
     val workTimeLabel: String,
     val durationSlots: Int,
     val procedureType: String,
@@ -29,6 +29,7 @@ object BotProcedureCatalog {
     private val list = listOf(
         BotProcedureOption(
             buttonText = "Маникюр гигиенический 45 мин",
+            keyboardLabel = "💅 Гигиенический",
             workTimeLabel = "45 мин",
             durationSlots = 4,
             procedureType = "Маникюр",
@@ -36,6 +37,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Педикюр экспресс 45 мин",
+            keyboardLabel = "🦶 Экспресс",
             workTimeLabel = "45 мин",
             durationSlots = 4,
             procedureType = "Педикюр",
@@ -43,6 +45,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Маникюр + покрытие 90 мин",
+            keyboardLabel = "💅 Покрытие",
             workTimeLabel = "90 мин",
             durationSlots = 8,
             procedureType = "Маникюр",
@@ -50,6 +53,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Педикюр экспресс + гель лак 45 мин",
+            keyboardLabel = "🦶 Экспресс+гель",
             workTimeLabel = "45 мин",
             durationSlots = 4,
             procedureType = "Педикюр",
@@ -57,6 +61,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Маникюр + наращивание 180 мин",
+            keyboardLabel = "💅 Наращивание",
             workTimeLabel = "3 ч",
             durationSlots = 16,
             procedureType = "Маникюр",
@@ -64,6 +69,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Педикюр смарт 75 мин",
+            keyboardLabel = "🦶 Смарт",
             workTimeLabel = "75 мин",
             durationSlots = 6,
             procedureType = "Педикюр",
@@ -71,6 +77,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Маникюр + коррекция 150 мин",
+            keyboardLabel = "💅 Коррекция",
             workTimeLabel = "2,5 ч",
             durationSlots = 12,
             procedureType = "Маникюр",
@@ -78,6 +85,7 @@ object BotProcedureCatalog {
         ),
         BotProcedureOption(
             buttonText = "Педикюр смарт + покрытие 90 мин",
+            keyboardLabel = "🦶 Смарт+покрытие",
             workTimeLabel = "90 мин",
             durationSlots = 8,
             procedureType = "Педикюр",

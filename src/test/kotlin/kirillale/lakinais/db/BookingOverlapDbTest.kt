@@ -43,7 +43,8 @@ class BookingOverlapDbTest {
         val fx = newFixture()
         fx.createBooking(LocalTime.of(12, 0), fx.procedureSixSlots)
         assertFalse(fx.isAvailable(LocalTime.of(13, 30), durationSlots = 4))
-        assertTrue(fx.isAvailable(LocalTime.of(13, 45), durationSlots = 4))
+        assertFalse(fx.isAvailable(LocalTime.of(13, 45), durationSlots = 4))
+        assertTrue(fx.isAvailable(LocalTime.of(14, 0), durationSlots = 4))
     }
 
     @Test
@@ -58,7 +59,8 @@ class BookingOverlapDbTest {
         val slotTimes = slots.map { it.startTime.atZone(fx.zoneId).toLocalTime() }
         assertFalse(slotTimes.contains(LocalTime.of(12, 15)))
         assertFalse(slotTimes.contains(LocalTime.of(13, 30)))
-        assertTrue(slotTimes.contains(LocalTime.of(13, 45)))
+        assertFalse(slotTimes.contains(LocalTime.of(13, 45)))
+        assertTrue(slotTimes.contains(LocalTime.of(14, 0)))
     }
 
     @Test
@@ -66,8 +68,9 @@ class BookingOverlapDbTest {
         val fx = newFixture()
         fx.createBooking(LocalTime.of(10, 0), fx.procedureFourSlots)
         fx.createBooking(LocalTime.of(14, 0), fx.procedureFourSlots)
-        assertTrue(fx.isAvailable(LocalTime.of(11, 15), durationSlots = 4))
-        assertFalse(fx.isAvailable(LocalTime.of(11, 15), durationSlots = 11))
+        assertFalse(fx.isAvailable(LocalTime.of(11, 15), durationSlots = 4))
+        assertTrue(fx.isAvailable(LocalTime.of(12, 0), durationSlots = 4))
+        assertFalse(fx.isAvailable(LocalTime.of(12, 0), durationSlots = 11))
     }
 
     @Test
@@ -75,7 +78,8 @@ class BookingOverlapDbTest {
         val fx = newFixture()
         val booking = fx.createBooking(LocalTime.of(12, 0), fx.procedureSixSlots)
         BookingService().cancelBooking(booking.id)
-        assertTrue(fx.isAvailable(LocalTime.of(12, 15), durationSlots = 4))
+        assertFalse(fx.isAvailable(LocalTime.of(12, 15), durationSlots = 4))
+        assertTrue(fx.isAvailable(LocalTime.of(12, 0), durationSlots = 4))
     }
 
     @Test
@@ -129,6 +133,22 @@ class BookingOverlapDbTest {
         val lastEnd = slots.last().endTime.atZone(fx.zoneId).toLocalTime()
         assertEquals(LocalTime.of(10, 0), first)
         assertEquals(LocalTime.of(19, 0), lastEnd)
+    }
+
+    @Test
+    fun emptyDayOffersOnlyWholeHourStarts() {
+        val fx = newFixture()
+        val slots = SlotAvailabilityService().getAvailableSlotsForDay(
+            schedule = fx.schedule,
+            slotDurationSlots = 4,
+            zoneId = fx.zoneId,
+        )
+        val slotTimes = slots.map { it.startTime.atZone(fx.zoneId).toLocalTime() }
+        assertTrue(slotTimes.contains(LocalTime.of(10, 0)))
+        assertTrue(slotTimes.contains(LocalTime.of(11, 0)))
+        assertFalse(slotTimes.contains(LocalTime.of(10, 15)))
+        assertFalse(slotTimes.contains(LocalTime.of(10, 30)))
+        assertFalse(slotTimes.contains(LocalTime.of(10, 45)))
     }
 
     private fun newFixture(): BookingTestFixture {

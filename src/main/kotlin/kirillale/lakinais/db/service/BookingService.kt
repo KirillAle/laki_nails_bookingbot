@@ -29,9 +29,13 @@ class BookingService(
         priceSnapshot: BigDecimal? = null,
         startTime: Instant? = null,
         extraOccupied: List<Pair<Instant, Instant>> = emptyList(),
+        requireWholeHourStart: Boolean = true,
         zoneId: ZoneId = DEFAULT_ZONE,
     ): BookingEntity {
         require(startTime != null) { "Для варианта А (1 день = 1 строка) startTime обязателен" }
+        require(!requireWholeHourStart || isWholeHourStart(startTime, zoneId)) {
+            "Начало записи должно быть ровно в начале часа"
+        }
         val procedure = procedureRepository.findById(procedureId)
             ?: throw IllegalStateException("Процедура не найдена: $procedureId")
         if (!isSlotAvailable(
@@ -39,6 +43,7 @@ class BookingService(
                 startTime = startTime,
                 durationSlots = procedure.durationSlot,
                 extraOccupied = extraOccupied,
+                requireWholeHourStart = requireWholeHourStart,
                 zoneId = zoneId,
             )) {
             throw IllegalStateException("Слот пересекается с другой записью: день=$scheduleId, время=$startTime")
@@ -75,10 +80,12 @@ class BookingService(
         durationSlots: Int,
         excludeBookingId: UUID? = null,
         extraOccupied: List<Pair<Instant, Instant>> = emptyList(),
+        requireWholeHourStart: Boolean = true,
         zoneId: ZoneId = DEFAULT_ZONE,
     ): Boolean {
         val schedule = masterScheduleRepository.findById(scheduleId) ?: return false
         if (!schedule.isOpen) return false
+        if (requireWholeHourStart && !isWholeHourStart(startTime, zoneId)) return false
         val slotEnd = BookingIntervals.slotEnd(startTime, durationSlots)
         val bookings = bookingRepository.findByScheduleId(scheduleId)
         for (booking in bookings) {
@@ -96,6 +103,11 @@ class BookingService(
             return false
         }
         return true
+    }
+
+    private fun isWholeHourStart(startTime: Instant, zoneId: ZoneId): Boolean {
+        val localTime = startTime.atZone(zoneId).toLocalTime()
+        return localTime.minute == 0 && localTime.second == 0 && localTime.nano == 0
     }
 
     /** Все бронирования на день (для мастера / проверок). */

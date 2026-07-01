@@ -96,15 +96,31 @@ object MasterKeyboards {
         callbackPrefix: String,
         zoneId: ZoneId,
     ): InlineKeyboardMarkup {
-        val rows = days.map { schedule ->
+        val buttons = days.map { schedule ->
             val date = schedule.date.atZone(zoneId).toLocalDate()
-            listOf(
-                CallbackDataInlineKeyboardButton(
-                    DateIntervalBuilder.formatDayLabel(date),
-                    "$callbackPrefix${schedule.id}",
-                ),
+            CallbackDataInlineKeyboardButton(
+                DateIntervalBuilder.formatDayLabel(date),
+                "$callbackPrefix${schedule.id}",
             )
-        }.toMutableList()
+        }
+        val rows = buttonsToRows(buttons, columns = 1).toMutableList()
+        rows += listOf(listOf(CallbackDataInlineKeyboardButton("◀️ В меню", MasterCallbackData.MENU)))
+        return InlineKeyboardMarkup(keyboard = rows)
+    }
+
+    fun bookingsDayPicker(
+        days: List<MasterScheduleEntity>,
+        bookingCountByScheduleId: Map<java.util.UUID, Int>,
+        zoneId: ZoneId,
+    ): InlineKeyboardMarkup {
+        val buttons = days.map { schedule ->
+            val date = schedule.date.atZone(zoneId).toLocalDate()
+            CallbackDataInlineKeyboardButton(
+                "${DateIntervalBuilder.formatDayLabel(date)} (${bookingCountByScheduleId[schedule.id] ?: 0})",
+                "${MasterCallbackData.BOOKS_DAY_PREFIX}${schedule.id}",
+            )
+        }
+        val rows = buttonsToRows(buttons, columns = 2).toMutableList()
         rows += listOf(listOf(CallbackDataInlineKeyboardButton("◀️ В меню", MasterCallbackData.MENU)))
         return InlineKeyboardMarkup(keyboard = rows)
     }
@@ -178,17 +194,27 @@ object MasterKeyboards {
         ),
     )
 
-    private fun timeRows(times: List<LocalTime>, prefix: String): List<List<CallbackDataInlineKeyboardButton>> {
-        // 2 кнопки в ряд, чтобы не было слишком длинно
+    private fun timeRows(times: List<LocalTime>, prefix: String): List<List<CallbackDataInlineKeyboardButton>> =
+        buttonsToRows(
+            times.map { t ->
+                val label = timeFormatter.format(t)
+                CallbackDataInlineKeyboardButton(label, prefix + label)
+            },
+            columns = 2,
+        )
+
+    private fun buttonsToRows(
+        buttons: List<CallbackDataInlineKeyboardButton>,
+        columns: Int,
+    ): List<List<CallbackDataInlineKeyboardButton>> {
+        if (buttons.isEmpty()) return emptyList()
+        val cols = columns.coerceAtLeast(1)
         val rows = mutableListOf<List<CallbackDataInlineKeyboardButton>>()
-        val items = times.map { t ->
-            val label = timeFormatter.format(t)
-            CallbackDataInlineKeyboardButton(label, prefix + label)
-        }
         var i = 0
-        while (i < items.size) {
-            rows += if (i + 1 < items.size) listOf(items[i], items[i + 1]) else listOf(items[i])
-            i += 2
+        while (i < buttons.size) {
+            val row = buttons.subList(i, minOf(i + cols, buttons.size))
+            rows += row
+            i += cols
         }
         return rows
     }

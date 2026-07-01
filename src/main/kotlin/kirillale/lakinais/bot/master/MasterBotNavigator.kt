@@ -2,8 +2,13 @@ package kirillale.lakinais.bot.master
 
 import dev.inmo.tgbotapi.bot.TelegramBot
 import dev.inmo.tgbotapi.extensions.api.send.sendMessage
+import dev.inmo.tgbotapi.types.ChatId
 import dev.inmo.tgbotapi.types.IdChatIdentifier
+import dev.inmo.tgbotapi.types.RawChatId
 import kirillale.lakinais.booking.DateIntervalBuilder
+import kirillale.lakinais.db.TestDataMarkers
+import kirillale.lakinais.db.repositiries.AccountRepository
+import kirillale.lakinais.db.repositiries.BookingRepository
 import kirillale.lakinais.booking.SalonTime
 import kirillale.lakinais.booking.schedule.WeekSchedulePlan
 import kirillale.lakinais.bot.BookingFlowState
@@ -18,6 +23,7 @@ import kirillale.lakinais.db.service.ScheduleManagementService
 import kirillale.lakinais.db.service.MasterTimeBlockService
 import kirillale.lakinais.domain.role.PermissionService
 import kirillale.lakinais.domain.role.StaffPermission
+import org.slf4j.LoggerFactory
 import java.time.LocalTime
 import java.time.LocalDate
 import java.time.ZoneId
@@ -31,9 +37,12 @@ class MasterBotNavigator(
     private val bookingQueryService: BookingQueryService,
     private val bookingManagementService: BookingManagementService,
     private val masterTimeBlockService: MasterTimeBlockService = MasterTimeBlockService(),
+    private val accountRepository: AccountRepository = AccountRepository(),
+    private val bookingRepository: BookingRepository = BookingRepository(),
     private val defaultSchedulePlan: WeekSchedulePlan,
     private val zoneId: ZoneId,
 ) {
+    private val log = LoggerFactory.getLogger(MasterBotNavigator::class.java)
     private val scheduleEditor = MasterScheduleEditor(bot, scheduleManagementService, defaultSchedulePlan, zoneId)
     fun isStaff(account: AccountFormEntity): Boolean = permissionService.isStaff(account)
 
@@ -124,7 +133,14 @@ class MasterBotNavigator(
             bot.sendMessage(chatId, "Нет открытых дней. Сначала откройте запись.", replyMarkup = MasterKeyboards.mainMenu())
             return
         }
-        bot.sendMessage(chatId, "Выберите день:", replyMarkup = MasterKeyboards.dayPicker(days, MasterCallbackData.BOOKS_DAY_PREFIX, zoneId))
+        val bookingCounts = days.associate { schedule ->
+            schedule.id to bookingQueryService.listForDay(schedule.id, zoneId).size
+        }
+        bot.sendMessage(
+            chatId,
+            "Выберите день (количество в скобках):",
+            replyMarkup = MasterKeyboards.bookingsDayPicker(days, bookingCounts, zoneId),
+        )
     }
 
     suspend fun sendBookingsForSchedule(chatId: IdChatIdentifier, scheduleId: UUID) {
@@ -174,6 +190,7 @@ class MasterBotNavigator(
                 appendLine(view.procedureLabel)
                 appendLine("Клиент: ${view.clientName}")
                 view.clientPhone?.let { appendLine("📞 $it") }
+                view.clientUserName?.let { appendLine("Telegram: $it") }
                 appendLine("Статус: ${view.status}")
             },
             replyMarkup = MasterKeyboards.bookingActions(bookingId),
@@ -188,8 +205,41 @@ class MasterBotNavigator(
 
     suspend fun confirmBooking(chatId: IdChatIdentifier, account: AccountFormEntity, bookingId: UUID) {
         if (!requirePermission(account, StaffPermission.CONFIRM_BOOKINGS)) return
+        val view = bookingQueryService.getView(bookingId, zoneId) ?: run {
+            bot.sendMessage(chatId, "Запись не найдена.")
+            return
+        }
+        if (view.status != "PENDING") {
+            bot.sendMessage(chatId, "Запись уже обработана.", replyMarkup = MasterKeyboards.mainMenu())
+            return
+        }
         bookingManagementService.confirm(bookingId)
         bot.sendMessage(chatId, "Запись подтверждена.", replyMarkup = MasterKeyboards.mainMenu())
+        notifyClientBookingConfirmed(view)
+    }
+
+    suspend fun notifyStaffAboutPendingBookings(bookingIds: List<UUID>) {
+        if (bookingIds.isEmpty()) return
+        val recipients = staffNotificationRecipients()
+        if (recipients.isEmpty()) {
+            log.warn("No staff recipients for pending booking notifications")
+            return
+        }
+        for (bookingId in bookingIds) {
+            val view = bookingQueryService.getView(bookingId, zoneId) ?: continue
+            val text = formatPendingBookingNotification(view)
+            for (recipientChatId in recipients) {
+                try {
+                    bot.sendMessage(
+                        recipientChatId,
+                        text,
+                        replyMarkup = MasterKeyboards.bookingActions(bookingId),
+                    )
+                } catch (e: Exception) {
+                    log.warn("Failed pending booking notification to {}: {}", recipientChatId, e.message)
+                }
+            }
+        }
     }
 
     fun resolveMasterIdFor(account: AccountFormEntity): UUID = resolveMasterId(account)
@@ -340,6 +390,48 @@ class MasterBotNavigator(
 
     private fun resolveMasterId(@Suppress("UNUSED_PARAMETER") account: AccountFormEntity): UUID =
         masterResolver.resolveMasterId()
+
+    private fun staffNotificationRecipients(): List<ChatId> {
+        val staffRoles = listOf("OWNER", "ADMIN", "MASTER", "M")
+        return staffRoles
+            .flatMap { accountRepository.findByRole(it) }
+            .distinctBy { it.id }
+            .filter { permissionService.hasPermission(it, StaffPermission.CONFIRM_BOOKINGS) }
+            .filter { !TestDataMarkers.isTestTelegramId(it.telegramId) }
+            .mapNotNull { account ->
+                account.telegramId?.toLongOrNull()?.let { ChatId(RawChatId(it)) }
+            }
+    }
+
+    private suspend fun notifyClientBookingConfirmed(view: BookingView) {
+        val booking = bookingRepository.findById(view.bookingId) ?: return
+        val client = accountRepository.findById(booking.clientId) ?: return
+        val telegramId = client.telegramId?.toLongOrNull() ?: return
+        try {
+            bot.sendMessage(
+                ChatId(RawChatId(telegramId)),
+                buildString {
+                    appendLine("✅ Мастер подтвердил вашу запись")
+                    appendLine()
+                    appendLine("${view.dateLabel}, ${view.timeLabel}")
+                    appendLine(view.procedureLabel)
+                },
+            )
+        } catch (e: Exception) {
+            log.warn("Failed client confirmation notification for booking {}: {}", view.bookingId, e.message)
+        }
+    }
+
+    private fun formatPendingBookingNotification(view: BookingView): String = buildString {
+        appendLine("🔔 Новая запись")
+        appendLine("Ожидает подтверждения мастера")
+        appendLine()
+        appendLine("${view.dateLabel}, ${view.timeLabel}")
+        appendLine(view.procedureLabel)
+        appendLine("Клиент: ${view.clientName}")
+        view.clientPhone?.let { appendLine("📞 $it") }
+        view.clientUserName?.let { appendLine("Telegram: $it") }
+    }
 
     private fun formatBookingsHeader(title: String, date: LocalDate, bookings: List<BookingView>): String {
         val label = DateIntervalBuilder.formatDayLabel(date)

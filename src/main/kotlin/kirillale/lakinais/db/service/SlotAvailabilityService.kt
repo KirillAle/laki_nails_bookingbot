@@ -13,14 +13,14 @@ import java.util.UUID
 
 /**
  * Расчёт доступных слотов по варианту А: одна строка master_schedule = один день.
- * Слоты генерируются в коде: от time_start до time_end шагом 15 мин, минус перерыв и блокировки.
+ * Старт записи показывается только на начале часа, минус перерыв и блокировки.
  */
 class SlotAvailabilityService(
     private val bookingRepository: BookingRepository = BookingRepository(),
     private val masterTimeBlockRepository: MasterTimeBlockRepository = MasterTimeBlockRepository(),
     private val procedureRepository: ProcedureRepository = ProcedureRepository(),
 ) {
-    private val slotStepMinutes = 15
+    private val slotStartStepMinutes = 60
 
     private fun atDayAndTime(day: Instant, timeOfDay: Instant, zoneId: ZoneId): Instant {
         val localDate = day.atZone(zoneId).toLocalDate()
@@ -48,14 +48,14 @@ class SlotAvailabilityService(
         val hasBreak = kirillale.lakinais.booking.schedule.ScheduleMapper.hasBreak(schedule, zoneId)
         val breakStart = if (hasBreak) atDayAndTime(dayDate, schedule.breakStart, zoneId) else dayStart
         val breakEnd = if (hasBreak) atDayAndTime(dayDate, schedule.breakEnd, zoneId) else dayStart
-        val durationMinutes = slotDurationSlots * slotStepMinutes
+        val durationMinutes = slotDurationSlots * BookingIntervals.SLOT_MINUTES
 
         val durationSeconds = durationMinutes * 60L
         val blocks = masterTimeBlockRepository.findByMasterIdAndDate(masterId, schedule.date)
         val bookedRanges = bookedTimeRanges(schedule, zoneId)
 
         val slots = mutableListOf<AvailableSlot>()
-        var slotStart = dayStart
+        var slotStart = firstWholeHourAtOrAfter(dayStart, zoneId)
 
         while (slotStart.plusSeconds(durationSeconds) <= dayEnd) {
             val slotEnd = slotStart.plusSeconds(durationSeconds)
@@ -78,7 +78,7 @@ class SlotAvailabilityService(
                     )
                 )
             }
-            slotStart = slotStart.plusSeconds(slotStepMinutes * 60L)
+            slotStart = slotStart.plusSeconds(slotStartStepMinutes * 60L)
         }
         return slots
     }
@@ -101,5 +101,11 @@ class SlotAvailabilityService(
             val start = SalonTime.bookingStartOnDay(schedule.date, storedStart, zoneId)
             start to BookingIntervals.slotEnd(start, procedure.durationSlot)
         }
+    }
+
+    private fun firstWholeHourAtOrAfter(instant: Instant, zoneId: ZoneId): Instant {
+        val local = instant.atZone(zoneId)
+        val wholeHour = local.withMinute(0).withSecond(0).withNano(0)
+        return (if (local == wholeHour) wholeHour else wholeHour.plusHours(1)).toInstant()
     }
 }
